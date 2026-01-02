@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Evilginx Management Platform</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- Login Screen -->
+    <div id="login-screen" class="screen">
+        <div class="login-container">
+            <div class="login-logo">
+                <div class="logo-icon">⚡</div>
+                <h1>EVILGINX</h1>
+                <p class="tagline">Management Platform</p>
+            </div>
+            <form id="login-form">
+                <div class="form-group">
+                    <label for="login-email">Email</label>
+                    <input type="email" id="login-email" placeholder="admin@example.com" required>
+                </div>
+                <div class="form-group">
+                    <label for="login-password">Password</label>
+                    <input type="password" id="login-password" placeholder="••••••••" required>
+                </div>
+                <button type="submit" class="btn btn-primary btn-block">
+                    <span>Sign In</span>
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M5 12h14M12 5l7 7-7 7"/>
+                    </svg>
+                </button>
+            </form>
+            <p class="login-footer">Don't have an account? <a href="#" id="show-register">Register</a></p>
+        </div>
+    </div>
+
+    <!-- Register Screen -->
+    <div id="register-screen" class="screen hidden">
+        <div class="login-container">
+            <div class="login-logo">
+                <div class="logo-icon">⚡</div>
+                <h1>EVILGINX</h1>
+                <p class="tagline">Create Account</p>
+            </div>
+            <form id="register-form">
+                <div class="form-group">
+                    <label for="reg-username">Username</label>
+                    <input type="text" id="reg-username" placeholder="username" required>
+                </div>
+                <div class="form-group">
+                    <label for="reg-email">Email</label>
+                    <input type="email" id="reg-email" placeholder="email@example.com" required>
+                </div>
+                <div class="form-group">
+                    <label for="reg-password">Password</label>
+                    <input type="password" id="reg-password" placeholder="••••••••" required>
+                </div>
+                <div class="form-group">
+                    <label for="reg-confirm">Confirm Password</label>
+                    <input type="password" id="reg-confirm" placeholder="••••••••" required>
+                </div>
+                <button type="submit" class="btn btn-primary btn-block">Create Account</button>
+            </form>
+            <p class="login-footer">Already have an account? <a href="#" id="show-login">Sign In</a></p>
+        </div>
+    </div>
+
+    <!-- Main Dashboard -->
+    <div id="dashboard-screen" class="screen hidden">
+        <nav class="sidebar">
+            <div class="sidebar-header">
+                <div class="logo-icon small">⚡</div>
+                <span class="brand">EVILGINX</span>
+            </div>
+            <ul class="nav-menu">
+                <li class="nav-item active" data-page="overview">
+                    <svg viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>
+                    <span>Overview</span>
+                </li>
+                <li class="nav-item" data-page="vps">
+                    <svg viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+                    <span>VPS Servers</span>
+                </li>
+                <li class="nav-item" data-page="deployments">
+                    <svg viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+                    <span>Deployments</span>
+                </li>
+                <li class="nav-item" data-page="settings">
+                    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 01-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+                    <span>Settings</span>
+                </li>
+            </ul>
+            <div class="sidebar-footer">
+                <div class="user-info">
+                    <div class="avatar" id="user-avatar">U</div>
+                    <div class="user-details">
+                        <span class="username" id="user-name">User</span>
+                        <span class="subscription" id="user-plan">Unlimited</span>
+                    </div>
+                </div>
+                <button class="btn-icon" id="logout-btn" title="Logout">
+                    <svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/></svg>
+                </button>
+            </div>
+        </nav>
+
+        <main class="main-content">
+            <!-- Overview Page -->
+            <div id="page-overview" class="page active">
+                <div class="page-header">
+                    <h1>Dashboard Overview</h1>
+                    <p>Monitor your VPS instances and deployments</p>
+                </div>
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-icon green">
+                            <svg viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+                        </div>
+                        <div class="stat-info">
+                            <span class="stat-value" id="stat-vps-count">0</span>
+                            <span class="stat-label">VPS Instances</span>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon blue">
+                            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+                        </div>
+                        <div class="stat-info">
+                            <span class="stat-value" id="stat-running-count">0</span>
+                            <span class="stat-label">Running</span>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon purple">
+                            <svg viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+                        </div>
+                        <div class="stat-info">
+                            <span class="stat-value" id="stat-deploy-count">0</span>
+                            <span class="stat-label">Deployments</span>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon orange">
+                            <svg viewBox="0 0 24 24"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><path d="M12 9v4M12 17h.01"/></svg>
+                        </div>
+                        <div class="stat-info">
+                            <span class="stat-value" id="stat-error-count">0</span>
+                            <span class="stat-label">Errors</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="content-grid">
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>Quick Actions</h3>
+                        </div>
+                        <div class="card-body">
+                            <div class="quick-actions">
+                                <button class="quick-action-btn" onclick="app.showAddVPSModal()">
+                                    <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+                                    <span>Add VPS</span>
+                                </button>
+                                <button class="quick-action-btn" onclick="app.triggerUpdateAll()">
+                                    <svg viewBox="0 0 24 24"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
+                                    <span>Update All</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>Recent Activity</h3>
+                        </div>
+                        <div class="card-body">
+                            <ul class="activity-list" id="recent-activity">
+                                <li class="activity-item placeholder">No recent activity</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- VPS Page -->
+            <div id="page-vps" class="page">
+                <div class="page-header">
+                    <div>
+                        <h1>VPS Servers</h1>
+                        <p>Manage your VPS instances (max 2)</p>
+                    </div>
+                    <button class="btn btn-primary" onclick="app.showAddVPSModal()">
+                        <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+                        <span>Add VPS</span>
+                    </button>
+                </div>
+
+                <div class="vps-grid" id="vps-list">
+                    <!-- VPS cards will be populated here -->
+                </div>
+            </div>
+
+            <!-- Deployments Page -->
+            <div id="page-deployments" class="page">
+                <div class="page-header">
+                    <h1>Deployment History</h1>
+                    <p>View all deployment activities</p>
+                </div>
+                <div class="card">
+                    <div class="card-body">
+                        <table class="table">
+                            <thead>
+                                <tr>
+                                    <th>VPS</th>
+                                    <th>Type</th>
+                                    <th>Status</th>
+                                    <th>Version</th>
+                                    <th>Duration</th>
+                                    <th>Date</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="deployments-table">
+                                <!-- Deployments will be populated here -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Settings Page -->
+            <div id="page-settings" class="page">
+                <div class="page-header">
+                    <h1>Settings</h1>
+                    <p>Configure your platform settings</p>
+                </div>
+
+                <div class="settings-grid">
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>GitHub Auto-Update</h3>
+                        </div>
+                        <div class="card-body">
+                            <form id="github-settings-form">
+                                <div class="form-group">
+                                    <label>Repository URL</label>
+                                    <input type="text" id="github-repo" placeholder="https://github.com/user/repo.git">
+                                </div>
+                                <div class="form-group">
+                                    <label>Branch</label>
+                                    <input type="text" id="github-branch" placeholder="main">
+                                </div>
+                                <div class="form-group">
+                                    <label class="toggle-label">
+                                        <span>Auto-update on push</span>
+                                        <input type="checkbox" id="github-auto-update">
+                                        <span class="toggle"></span>
+                                    </label>
+                                </div>
+                                <div class="form-group">
+                                    <label>Webhook Secret</label>
+                                    <div class="input-group">
+                                        <input type="text" id="github-secret" readonly>
+                                        <button type="button" class="btn btn-secondary" onclick="app.regenerateWebhookSecret()">Regenerate</button>
+                                    </div>
+                                    <small>Use this secret when configuring GitHub webhook</small>
+                                </div>
+                                <div class="form-group">
+                                    <label>Webhook URL</label>
+                                    <input type="text" id="github-webhook-url" readonly>
+                                    <small>Add this URL to your GitHub repository's webhook settings</small>
+                                </div>
+                                <button type="submit" class="btn btn-primary">Save Settings</button>
+                            </form>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>Account</h3>
+                        </div>
+                        <div class="card-body">
+                            <div class="account-info">
+                                <div class="info-row">
+                                    <span>Email:</span>
+                                    <span id="account-email">-</span>
+                                </div>
+                                <div class="info-row">
+                                    <span>Plan:</span>
+                                    <span class="badge badge-success">Unlimited - $250/mo</span>
+                                </div>
+                                <div class="info-row">
+                                    <span>VPS Slots:</span>
+                                    <span><span id="account-vps-used">0</span> / 2</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Add VPS Modal -->
+    <div id="modal-backdrop" class="modal-backdrop hidden">
+        <div class="modal" id="add-vps-modal">
+            <div class="modal-header">
+                <h2 id="modal-title">Add VPS Server</h2>
+                <button class="btn-icon" onclick="app.closeModal()">
+                    <svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                </button>
+            </div>
+            <div class="modal-body">
+                <form id="add-vps-form">
+                    <div class="form-group">
+                        <label for="vps-name">Name *</label>
+                        <input type="text" id="vps-name" placeholder="My Production VPS" required>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="vps-host">Host/IP *</label>
+                            <input type="text" id="vps-host" placeholder="192.168.1.100" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="vps-port">SSH Port</label>
+                            <input type="number" id="vps-port" value="22">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="vps-username">Username *</label>
+                        <input type="text" id="vps-username" placeholder="root" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Authentication</label>
+                        <div class="radio-group">
+                            <label class="radio-label">
+                                <input type="radio" name="auth-type" value="password" checked>
+                                <span>Password</span>
+                            </label>
+                            <label class="radio-label">
+                                <input type="radio" name="auth-type" value="key">
+                                <span>SSH Key</span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="form-group" id="password-field">
+                        <label for="vps-password">Password</label>
+                        <input type="password" id="vps-password" placeholder="••••••••">
+                    </div>
+                    <div class="form-group hidden" id="sshkey-field">
+                        <label for="vps-sshkey">SSH Private Key</label>
+                        <textarea id="vps-sshkey" rows="4" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"></textarea>
+                    </div>
+                    <hr>
+                    <div class="form-group">
+                        <label for="vps-github-repo">GitHub Repository</label>
+                        <input type="text" id="vps-github-repo" placeholder="https://github.com/user/evilginx2.git">
+                    </div>
+                    <div class="form-group">
+                        <label for="vps-github-branch">Branch</label>
+                        <input type="text" id="vps-github-branch" value="main">
+                    </div>
+                    <div class="form-group">
+                        <label for="vps-install-path">Install Path</label>
+                        <input type="text" id="vps-install-path" value="/opt/evilginx">
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="app.closeModal()">Cancel</button>
+                <button class="btn btn-primary" onclick="app.addVPS()">Add VPS</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- VPS Details Modal -->
+    <div id="vps-details-modal-backdrop" class="modal-backdrop hidden">
+        <div class="modal modal-lg" id="vps-details-modal">
+            <div class="modal-header">
+                <h2 id="vps-details-title">VPS Details</h2>
+                <button class="btn-icon" onclick="app.closeDetailsModal()">
+                    <svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="vps-details-content" id="vps-details-content">
+                    <!-- Details will be populated here -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Logs Modal -->
+    <div id="logs-modal-backdrop" class="modal-backdrop hidden">
+        <div class="modal modal-lg" id="logs-modal">
+            <div class="modal-header">
+                <h2>Deployment Logs</h2>
+                <button class="btn-icon" onclick="app.closeLogsModal()">
+                    <svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                </button>
+            </div>
+            <div class="modal-body">
+                <pre class="logs-output" id="logs-output"></pre>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Container -->
+    <div id="toast-container"></div>
+
+    <script src="app.js"></script>
+</body>
+</html>
+
