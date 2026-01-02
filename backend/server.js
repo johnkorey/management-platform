@@ -7,46 +7,69 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
-const { Pool } = require('pg');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 // =====================================================
-// DATABASE CONNECTION
+// DATABASE CONNECTION (SQLite)
 // =====================================================
 
-const pool = new Pool({
-    host: process.env.DB_HOST || 'localhost',
-    port: process.env.DB_PORT || 5432,
-    database: process.env.DB_NAME || 'evilginx_management',
-    user: process.env.DB_USER || 'postgres',
-    password: process.env.DB_PASSWORD,
-    ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : false,
-    max: 20,
-    idleTimeoutMillis: 30000,
-    connectionTimeoutMillis: 2000,
-});
-
-// Test database connection
-pool.query('SELECT NOW()', (err, res) => {
-    if (err) {
-        console.error('❌ Database connection error:', err);
-        process.exit(1);
-    } else {
-        console.log('✅ Connected to PostgreSQL database');
-    }
-});
+const pool = require('./db');
 
 // =====================================================
 // MIDDLEWARE
 // =====================================================
 
-// Security
-app.use(helmet());
+// ✅ SECURITY FIX: Enhanced security headers
+app.use(helmet({
+    contentSecurityPolicy: {
+        directives: {
+            defaultSrc: ["'self'"],
+            scriptSrc: ["'self'", "'unsafe-inline'"],
+            styleSrc: ["'self'", "'unsafe-inline'"],
+            imgSrc: ["'self'", "data:", "https:"],
+            connectSrc: ["'self'"],
+            fontSrc: ["'self'"],
+            objectSrc: ["'none'"],
+            mediaSrc: ["'self'"],
+            frameSrc: ["'none'"],
+        },
+    },
+    hsts: {
+        maxAge: 31536000,  // 1 year
+        includeSubDomains: true,
+        preload: true
+    },
+    frameguard: {
+        action: 'deny'
+    },
+    noSniff: true,
+    xssFilter: true,
+}));
+
+// ✅ SECURITY FIX: Dynamic CORS configuration
+const allowedOrigins = process.env.CORS_ORIGINS ? 
+    process.env.CORS_ORIGINS.split(',') : 
+    ['http://localhost:3001', 'http://127.0.0.1:3001'];
+
 app.use(cors({
-    origin: process.env.CORS_ORIGIN || 'http://localhost:3001',
-    credentials: true
+    origin: (origin, callback) => {
+        // Allow requests with no origin (mobile apps, Postman, etc.)
+        if (!origin) return callback(null, true);
+        
+        // Check if origin is allowed
+        if (allowedOrigins.includes(origin)) {
+            callback(null, true);
+        } else if (process.env.NODE_ENV === 'development' && 
+                   (origin.includes('localhost') || origin.includes('127.0.0.1'))) {
+            callback(null, true);
+        } else {
+            callback(new Error('Not allowed by CORS'));
+        }
+    },
+    credentials: true,
+    maxAge: 86400  // Cache preflight for 24 hours
 }));
 
 // Rate limiting
@@ -57,9 +80,16 @@ const limiter = rateLimit({
 });
 app.use('/api/', limiter);
 
-// Body parsing
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+// ✅ SECURITY FIX: Reduced body size limits
+app.use(express.json({ limit: '100kb' }));  // Reduced from 10mb
+app.use(express.urlencoded({ extended: false, limit: '50kb' }));  // Reduced, changed to false
+
+// ✅ SECURITY FIX: Add request timeout
+app.use((req, res, next) => {
+    req.setTimeout(30000);  // 30 seconds
+    res.setTimeout(30000);
+    next();
+});
 
 // Request logging
 app.use((req, res, next) => {
@@ -82,13 +112,24 @@ const statsRoutes = require('./routes/stats');
 const webhookRoutes = require('./routes/webhooks');
 const vpsRoutes = require('./routes/vps');
 const githubWebhookRoutes = require('./routes/github-webhook');
+const licenseRoutes = require('./routes/license');  // ✅ NEW: License validation
+const evilginxProxyRoutes = require('./routes/evilginx-proxy');  // ✅ NEW: Evilginx2 API proxy
 
-// Health check
+// Health check endpoints
 app.get('/health', (req, res) => {
     res.json({ 
         status: 'healthy', 
         timestamp: new Date().toISOString(),
         database: 'connected'
+    });
+});
+
+app.get('/api/health', (req, res) => {
+    res.json({ 
+        status: 'healthy', 
+        timestamp: new Date().toISOString(),
+        database: 'connected',
+        version: '1.0.0'
     });
 });
 
@@ -103,6 +144,8 @@ app.use('/api/stats', statsRoutes);
 app.use('/api/webhooks', webhookRoutes);
 app.use('/api/vps', vpsRoutes);
 app.use('/api/github', githubWebhookRoutes);
+app.use('/api/license', licenseRoutes);  // ✅ NEW: License validation
+app.use('/api/evilginx', evilginxProxyRoutes);  // ✅ NEW: Evilginx2 API proxy
 
 // 404 handler
 app.use((req, res) => {
@@ -146,4 +189,6 @@ process.on('SIGTERM', () => {
 
 // Export for testing
 module.exports = { app, pool };
+
+
 

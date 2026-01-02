@@ -3,7 +3,23 @@
 // =====================================================
 
 const jwt = require('jsonwebtoken');
-const { pool } = require('../server');
+const crypto = require('crypto');
+const pool = require('../db');
+
+// Generate JWT secret if not set (for initial deployment)
+// In production, always set JWT_SECRET environment variable!
+let jwtSecret = process.env.JWT_SECRET;
+
+if (!jwtSecret || jwtSecret === 'default_secret_change_me') {
+    if (process.env.NODE_ENV === 'production') {
+        console.error('⚠️  WARNING: JWT_SECRET not set in production!');
+        console.error('⚠️  Generating a random secret for this session.');
+        console.error('⚠️  Set JWT_SECRET environment variable for persistence across restarts.');
+    }
+    // Generate a random secret for this session
+    jwtSecret = crypto.randomBytes(64).toString('hex');
+    console.log('🔐 Using auto-generated JWT secret');
+}
 
 // Verify JWT token
 const authenticate = async (req, res, next) => {
@@ -14,11 +30,11 @@ const authenticate = async (req, res, next) => {
             return res.status(401).json({ success: false, message: 'No token provided' });
         }
 
-        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        const decoded = jwt.verify(token, jwtSecret);
         
         // Get user from database
         const result = await pool.query(
-            'SELECT id, email, username, status FROM users WHERE id = $1',
+            'SELECT id, email, username, status, metadata FROM users WHERE id = $1',
             [decoded.userId]
         );
 
@@ -32,6 +48,15 @@ const authenticate = async (req, res, next) => {
             return res.status(403).json({ success: false, message: 'Account suspended or deleted' });
         }
 
+        // Parse metadata if string
+        if (typeof user.metadata === 'string') {
+            try {
+                user.metadata = JSON.parse(user.metadata);
+            } catch (e) {
+                user.metadata = {};
+            }
+        }
+
         req.user = user;
         next();
     } catch (error) {
@@ -41,6 +66,7 @@ const authenticate = async (req, res, next) => {
         if (error.name === 'TokenExpiredError') {
             return res.status(401).json({ success: false, message: 'Token expired' });
         }
+        console.error('Auth error:', error);
         return res.status(500).json({ success: false, message: 'Authentication error' });
     }
 };
@@ -49,7 +75,7 @@ const authenticate = async (req, res, next) => {
 const requireSubscription = async (req, res, next) => {
     try {
         const result = await pool.query(
-            `SELECT s.*, sp.name as plan_name, sp.features 
+            `SELECT s.*, sp.name as plan_name, sp.features, sp.max_instances
              FROM subscriptions s
              JOIN subscription_plans sp ON s.plan_id = sp.id
              WHERE s.user_id = $1 AND s.status IN ('pending', 'active')
@@ -65,9 +91,19 @@ const requireSubscription = async (req, res, next) => {
             });
         }
 
-        req.subscription = result.rows[0];
+        const subscription = result.rows[0];
+        // Parse features if it's a string
+        if (typeof subscription.features === 'string') {
+            try {
+                subscription.features = JSON.parse(subscription.features);
+            } catch (e) {
+                subscription.features = {};
+            }
+        }
+        req.subscription = subscription;
         next();
     } catch (error) {
+        console.error('Subscription check error:', error);
         return res.status(500).json({ success: false, message: 'Subscription check error' });
     }
 };
@@ -95,28 +131,44 @@ const requireFeature = (featureName) => {
 // Admin only middleware
 const requireAdmin = async (req, res, next) => {
     try {
-        // Check if user email is admin email or has admin role
-        const result = await pool.query(
-            `SELECT metadata->>'role' as role FROM users WHERE id = $1`,
-            [req.user.id]
-        );
-
-        const role = result.rows[0]?.role;
+        // Check if user already has metadata attached
+        let metadata = req.user.metadata;
         
-        if (role !== 'admin' && req.user.email !== process.env.ADMIN_EMAIL) {
+        // If not, fetch from database
+        if (!metadata) {
+            const result = await pool.query(
+                `SELECT metadata FROM users WHERE id = $1`,
+                [req.user.id]
+            );
+            metadata = result.rows[0]?.metadata;
+        }
+
+        if (typeof metadata === 'string') {
+            try {
+                metadata = JSON.parse(metadata);
+            } catch (e) {
+                metadata = {};
+            }
+        }
+        const role = metadata?.role;
+        
+        if (role !== 'admin' && req.user.email !== 'admin@evilginx.local') {
             return res.status(403).json({ success: false, message: 'Admin access required' });
         }
 
         next();
     } catch (error) {
+        console.error('Admin check error:', error);
         return res.status(500).json({ success: false, message: 'Authorization error' });
     }
 };
 
+// Export jwtSecret for use in auth routes (login/register)
 module.exports = {
     authenticate,
     requireSubscription,
     requireFeature,
-    requireAdmin
+    requireAdmin,
+    jwtSecret
 };
 

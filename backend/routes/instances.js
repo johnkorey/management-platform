@@ -2,9 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { authenticate, requireSubscription } = require('../middleware/auth');
 const crypto = require('crypto');
-
-let pool;
-setTimeout(() => { pool = require('../server').pool; }, 100);
+const pool = require('../db');
 
 // GET /api/instances - List user's instances
 router.get('/', authenticate, requireSubscription, async (req, res) => {
@@ -15,6 +13,7 @@ router.get('/', authenticate, requireSubscription, async (req, res) => {
         );
         res.json({ success: true, data: result.rows });
     } catch (error) {
+        console.error('Error fetching instances:', error);
         res.status(500).json({ success: false, message: 'Error fetching instances' });
     }
 });
@@ -26,7 +25,7 @@ router.post('/', authenticate, requireSubscription, async (req, res) => {
 
         // Check subscription limits
         const instanceCount = await pool.query(
-            'SELECT COUNT(*) FROM instances WHERE user_id = $1',
+            'SELECT COUNT(*) as count FROM instances WHERE user_id = $1',
             [req.user.id]
         );
 
@@ -37,16 +36,19 @@ router.post('/', authenticate, requireSubscription, async (req, res) => {
             });
         }
 
-        // Generate instance API key
+        // Generate instance API key and ID
+        const instanceId = crypto.randomBytes(16).toString('hex');
         const apiKey = crypto.randomBytes(32).toString('hex');
 
-        // Create instance (in real implementation, this would provision a Docker container/VM)
-        const result = await pool.query(
-            `INSERT INTO instances (user_id, instance_name, server_ip, api_key, region, base_domain, status)
-             VALUES ($1, $2, $3, $4, $5, $6, 'provisioning')
-             RETURNING *`,
-            [req.user.id, instanceName, '0.0.0.0', apiKey, region, baseDomain]
+        // Create instance
+        await pool.query(
+            `INSERT INTO instances (id, user_id, instance_name, server_ip, api_key, region, base_domain, status)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, 'provisioning')`,
+            [instanceId, req.user.id, instanceName, '0.0.0.0', apiKey, region, baseDomain]
         );
+
+        // Get created instance
+        const result = await pool.query('SELECT * FROM instances WHERE id = $1', [instanceId]);
 
         res.status(201).json({ 
             success: true, 
@@ -79,7 +81,7 @@ router.post('/:id/heartbeat', async (req, res) => {
         // Update heartbeat
         await pool.query(
             `UPDATE instances 
-             SET last_heartbeat = CURRENT_TIMESTAMP, resource_usage = $1, health_status = $2
+             SET last_heartbeat = NOW(), resource_usage = $1, health_status = $2
              WHERE id = $3`,
             [JSON.stringify(resourceUsage), health || 'healthy', id]
         );
@@ -87,9 +89,9 @@ router.post('/:id/heartbeat', async (req, res) => {
         res.json({ success: true, message: 'Heartbeat recorded' });
 
     } catch (error) {
+        console.error('Heartbeat error:', error);
         res.status(500).json({ success: false, message: 'Heartbeat failed' });
     }
 });
 
 module.exports = router;
-

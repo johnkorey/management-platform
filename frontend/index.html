@@ -34,7 +34,8 @@
                     </svg>
                 </button>
             </form>
-            <p class="login-footer">Don't have an account? <a href="#" id="show-register">Register</a></p>
+            <!-- ✅ SECURITY FIX: Registration disabled - only admins can create users -->
+            <p class="login-footer">Contact your administrator for account access</p>
         </div>
     </div>
 
@@ -89,6 +90,14 @@
                     <svg viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
                     <span>Deployments</span>
                 </li>
+                <!-- ✅ SECURITY FIX: Admin-only User Management -->
+                <li class="nav-item" data-page="builds" data-admin-only="true" style="display: none;">
+                    <svg viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
+                    <span>Builds</span>
+                </li>                <li class="nav-item" data-page="users" data-admin-only="true" style="display: none;">
+                    <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg>
+                    <span>User Management</span>
+                </li>
                 <li class="nav-item" data-page="settings">
                     <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 01-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
                     <span>Settings</span>
@@ -100,6 +109,8 @@
                     <div class="user-details">
                         <span class="username" id="user-name">User</span>
                         <span class="subscription" id="user-plan">Unlimited</span>
+                        <!-- ✅ SECURITY FIX: Admin role badge (hidden by default) -->
+                        <span class="badge badge-warning" id="admin-badge" style="display: none; margin-top: 4px; font-size: 10px;">ADMIN</span>
                     </div>
                 </div>
                 <button class="btn-icon" id="logout-btn" title="Logout">
@@ -232,6 +243,144 @@
                 </div>
             </div>
 
+            <!-- Evilginx Builds Page (Admin Only) -->
+            <div id="page-builds" class="page" data-admin-only="true">
+                <div class="page-header">
+                    <h1>📦 Evilginx Builds</h1>
+                    <p>Upload and manage Evilginx source code builds for deployment</p>
+                </div>
+
+                <!-- Upload Form -->
+                <div class="card">
+                    <div class="card-header">
+                        <h2>Upload New Build</h2>
+                    </div>
+                    <div class="card-body">
+                        <form id="upload-build-form" enctype="multipart/form-data">
+                            <div class="form-row">
+                                <div class="form-group" style="flex: 1;">
+                                    <label for="build-version">Version *</label>
+                                    <input type="text" id="build-version" placeholder="e.g., 3.3.0" required>
+                                    <small>Semantic version number</small>
+                                </div>
+                                <div class="form-group" style="flex: 2;">
+                                    <label for="build-file">Build File * (.zip, .tar.gz)</label>
+                                    <input type="file" id="build-file" accept=".zip,.tar,.gz,.tgz,.tar.gz" required>
+                                    <small>Max 500MB. Should contain Evilginx2 source code</small>
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label for="build-description">Description / Release Notes</label>
+                                <textarea id="build-description" rows="3" placeholder="What's new in this version..."></textarea>
+                            </div>
+                            <div class="form-actions">
+                                <button type="submit" class="btn btn-primary">
+                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+                                        <polyline points="17 8 12 3 7 8"/>
+                                        <line x1="12" y1="3" x2="12" y2="15"/>
+                                    </svg>
+                                    <span>Upload Build</span>
+                                </button>
+                            </div>
+                        </form>
+                        <div id="upload-progress" class="upload-progress" style="display: none;">
+                            <div class="progress-bar">
+                                <div id="progress-fill" class="progress-fill"></div>
+                            </div>
+                            <p id="progress-text">Uploading... 0%</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Builds List -->
+                <div class="card">
+                    <div class="card-header">
+                        <h2>Uploaded Builds</h2>
+                        <button class="btn btn-secondary" onclick="app.loadBuilds()">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polyline points="23 4 23 10 17 10"/>
+                                <polyline points="1 20 1 14 7 14"/>
+                                <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/>
+                            </svg>
+                            <span>Refresh</span>
+                        </button>
+                    </div>
+                    <div class="card-body">
+                        <div class="table-container">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Status</th>
+                                        <th>Version</th>
+                                        <th>Description</th>
+                                        <th>Size</th>
+                                        <th>Uploaded By</th>
+                                        <th>Date</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="builds-table-body">
+                                    <tr>
+                                        <td colspan="7" class="text-center">Loading builds...</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Info Card -->
+                <div class="card info-card">
+                    <div class="card-body">
+                        <h3>ℹ️ How Build Deployment Works</h3>
+                        <ol>
+                            <li><strong>Admin uploads</strong> Evilginx source code (ZIP/tar.gz)</li>
+                            <li><strong>Platform stores</strong> the build and marks it as active</li>
+                            <li><strong>Users deploy</strong> to their VPS - the active build is automatically used</li>
+                            <li><strong>No GitHub required</strong> - builds are pushed directly from the platform</li>
+                        </ol>
+                        <p><strong>Tip:</strong> Package your build with: <code>tar -czf evilginx-3.3.0.tar.gz --exclude='.git' --exclude='node_modules' .</code></p>
+                    </div>
+                </div>
+            </div>
+
+
+
+            <!-- User Management Page (Admin Only) -->
+            <div id="page-users" class="page" data-admin-only="true">
+                <div class="page-header">
+                    <div>
+                        <h1>User Management</h1>
+                        <p>Manage user accounts (Admin Only)</p>
+                    </div>
+                    <button class="btn btn-primary" onclick="app.showCreateUserModal()">
+                        <svg viewBox="0 0 24 24" width="20" height="20"><path fill="none" stroke="currentColor" stroke-width="2" d="M12 5v14m-7-7h14"/></svg>
+                        Create User
+                    </button>
+                </div>
+                <div class="card">
+                    <div class="card-body">
+                        <table class="table">
+                            <thead>
+                                <tr>
+                                    <th>Username</th>
+                                    <th>Email</th>
+                                    <th>Status</th>
+                                    <th>Plan</th>
+                                    <th>VPS Count</th>
+                                    <th>Created</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="users-table">
+                                <!-- Users will be populated here -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
             <!-- Settings Page -->
             <div id="page-settings" class="page">
                 <div class="page-header">
@@ -240,20 +389,33 @@
                 </div>
 
                 <div class="settings-grid">
-                    <div class="card">
+                    <!-- ✅ SECURITY FIX: Admin-only section -->
+                    <div class="card" data-admin-only="true">
                         <div class="card-header">
-                            <h3>GitHub Auto-Update</h3>
+                            <h3>🐳 Deployment Settings</h3>
+                            <span class="badge badge-warning" style="margin-left: 10px;">Admin Only</span>
                         </div>
                         <div class="card-body">
                             <form id="github-settings-form">
                                 <div class="form-group">
+                                    <label>Docker Image (Recommended)</label>
+                                    <input type="text" id="docker-image" placeholder="e.g., ghcr.io/youruser/evilginx:latest">
+                                    <small style="color: #00ff41;">✓ Uses pre-built image - fastest deployment</small>
+                                </div>
+                                <hr style="border-color: #333; margin: 20px 0;">
+                                <p style="color: #888; font-size: 12px; margin-bottom: 15px;">
+                                    <strong>OR</strong> build from source (slower, requires Go compilation):
+                                </p>
+                                <div class="form-group">
                                     <label>Repository URL</label>
                                     <input type="text" id="github-repo" placeholder="https://github.com/user/repo.git">
+                                    <small>Leave empty if using Docker image above</small>
                                 </div>
                                 <div class="form-group">
                                     <label>Branch</label>
-                                    <input type="text" id="github-branch" placeholder="main">
+                                    <input type="text" id="github-branch" placeholder="main" value="main">
                                 </div>
+                                <hr style="border-color: #333; margin: 20px 0;">
                                 <div class="form-group">
                                     <label class="toggle-label">
                                         <span>Auto-update on push</span>
@@ -355,19 +517,10 @@
                         <label for="vps-sshkey">SSH Private Key</label>
                         <textarea id="vps-sshkey" rows="4" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"></textarea>
                     </div>
-                    <hr>
-                    <div class="form-group">
-                        <label for="vps-github-repo">GitHub Repository</label>
-                        <input type="text" id="vps-github-repo" placeholder="https://github.com/user/evilginx2.git">
-                    </div>
-                    <div class="form-group">
-                        <label for="vps-github-branch">Branch</label>
-                        <input type="text" id="vps-github-branch" value="main">
-                    </div>
-                    <div class="form-group">
-                        <label for="vps-install-path">Install Path</label>
-                        <input type="text" id="vps-install-path" value="/opt/evilginx">
-                    </div>
+                    <!-- GitHub settings are hidden from users - admin configures globally -->
+                    <input type="hidden" id="vps-github-repo">
+                    <input type="hidden" id="vps-github-branch" value="main">
+                    <input type="hidden" id="vps-install-path" value="/opt/evilginx">
                 </form>
             </div>
             <div class="modal-footer">
@@ -409,10 +562,349 @@
         </div>
     </div>
 
+    <!-- Create User Modal (Admin Only) -->
+    <div id="create-user-modal-backdrop" class="modal-backdrop hidden">
+        <div class="modal" id="create-user-modal">
+            <div class="modal-header">
+                <h2>Create New User</h2>
+                <button class="btn-icon" onclick="app.closeCreateUserModal()">
+                    <svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                </button>
+            </div>
+            <div class="modal-body">
+                <form id="create-user-form">
+                    <div class="form-group">
+                        <label for="new-user-username">Username *</label>
+                        <input type="text" id="new-user-username" placeholder="john_doe" required>
+                        <small>3-30 characters, letters, numbers, underscore, hyphen only</small>
+                    </div>
+                    <div class="form-group">
+                        <label for="new-user-email">Email *</label>
+                        <input type="email" id="new-user-email" placeholder="user@company.com" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="new-user-password">Password *</label>
+                        <input type="password" id="new-user-password" placeholder="••••••••" required>
+                        <small>Min 12 characters, must include uppercase, lowercase, number, and special character</small>
+                    </div>
+                    <div class="form-group">
+                        <label for="new-user-fullname">Full Name</label>
+                        <input type="text" id="new-user-fullname" placeholder="John Doe">
+                    </div>
+                    <div class="form-group">
+                        <label for="new-user-company">Company Name</label>
+                        <input type="text" id="new-user-company" placeholder="Acme Corp">
+                    </div>
+                    <div class="form-group">
+                        <label class="toggle-label">
+                            <span>Email Verified</span>
+                            <input type="checkbox" id="new-user-verified" checked>
+                            <span class="toggle"></span>
+                        </label>
+                        <small>Verified users can login immediately</small>
+                    </div>
+                    <div class="form-group">
+                        <label for="new-user-status">Account Status</label>
+                        <select id="new-user-status" class="form-control">
+                            <option value="active">Active</option>
+                            <option value="suspended">Suspended</option>
+                        </select>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="app.closeCreateUserModal()">Cancel</button>
+                <button class="btn btn-primary" onclick="app.createUser()">Create User</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Deployment Progress Modal -->
+    <div id="deployment-progress-modal-backdrop" class="modal-backdrop hidden">
+        <div class="modal modal-lg" id="deployment-progress-modal">
+            <div class="modal-header">
+                <div>
+                    <h2>Deploying Evilginx2</h2>
+                    <p style="font-size: 14px; color: var(--text-muted); margin: 5px 0 0 0;" id="deployment-vps-name">VPS Name</p>
+                </div>
+                <span class="badge" id="deployment-status-badge">In Progress</span>
+            </div>
+            <div class="modal-body">
+                <!-- Progress Bar -->
+                <div class="progress-container" style="margin-bottom: 20px;">
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="deployment-progress-fill" style="width: 0%;"></div>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; margin-top: 8px; font-size: 12px; color: var(--text-muted);">
+                        <span id="deployment-progress-text">Initializing...</span>
+                        <span id="deployment-progress-percent">0%</span>
+                    </div>
+                </div>
+                
+                <!-- Terminal Output -->
+                <div class="terminal-container">
+                    <div class="terminal-header">
+                        <div class="terminal-controls">
+                            <span class="terminal-dot" style="background: #ff5f56;"></span>
+                            <span class="terminal-dot" style="background: #ffbd2e;"></span>
+                            <span class="terminal-dot" style="background: #27c93f;"></span>
+                        </div>
+                        <div class="terminal-title">Deployment Terminal</div>
+                        <button class="btn-icon" onclick="app.clearTerminal()" title="Clear">
+                            <svg viewBox="0 0 24 24" width="16" height="16"><path fill="none" stroke="currentColor" stroke-width="2" d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+                        </button>
+                    </div>
+                    <div class="terminal-body" id="deployment-terminal">
+                        <div class="terminal-line">
+                            <span class="terminal-prompt">$</span>
+                            <span class="terminal-text">Waiting for deployment to start...</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="app.closeDeploymentModal()" id="deployment-close-btn" disabled>Close</button>
+                <button class="btn btn-error" onclick="app.cancelDeployment()" id="deployment-cancel-btn">Cancel Deployment</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Toast Container -->
     <div id="toast-container"></div>
+
+    <style>
+        /* Terminal Styles */
+        .terminal-container {
+            background: #1a1d23;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+            font-family: 'JetBrains Mono', 'Courier New', monospace;
+        }
+        
+        .terminal-header {
+            background: #2d3139;
+            padding: 10px 15px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            border-bottom: 1px solid #3a3f4b;
+        }
+        
+        .terminal-controls {
+            display: flex;
+            gap: 8px;
+        }
+        
+        .terminal-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+        }
+        
+        .terminal-title {
+            flex: 1;
+            text-align: center;
+            font-size: 12px;
+            color: #8b92a7;
+            font-weight: 500;
+        }
+        
+        .terminal-body {
+            background: #1a1d23;
+            color: #e4e4e4;
+            padding: 15px;
+            height: 400px;
+            overflow-y: auto;
+            font-size: 13px;
+            line-height: 1.6;
+        }
+        
+        .terminal-body::-webkit-scrollbar {
+            width: 8px;
+        }
+        
+        .terminal-body::-webkit-scrollbar-track {
+            background: #1a1d23;
+        }
+        
+        .terminal-body::-webkit-scrollbar-thumb {
+            background: #3a3f4b;
+            border-radius: 4px;
+        }
+        
+        .terminal-line {
+            display: flex;
+            margin-bottom: 4px;
+            word-wrap: break-word;
+        }
+        
+        .terminal-prompt {
+            color: #00ff41;
+            margin-right: 10px;
+            user-select: none;
+        }
+        
+        .terminal-text {
+            color: #e4e4e4;
+            flex: 1;
+            white-space: pre-wrap;
+        }
+        
+        .terminal-text.info { color: #61afef; }
+        .terminal-text.success { color: #00ff41; }
+        .terminal-text.warning { color: #ffaa00; }
+        .terminal-text.error { color: #ff5555; }
+        
+        .progress-container {
+            width: 100%;
+        }
+        
+        .progress-bar {
+            width: 100%;
+            height: 8px;
+            background: #2d3139;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #00d9ff, #00ff88);
+            transition: width 0.3s ease;
+            border-radius: 4px;
+        }
+        
+        .progress-fill.complete {
+            background: linear-gradient(90deg, #00ff88, #00d9ff);
+        }
+        
+        .progress-fill.error {
+            background: #ff5555;
+        }
+        
+        /* Connection Status Indicator */
+        .connection-indicator {
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .connection-indicator.connected {
+            background: rgba(0, 255, 65, 0.2);
+        }
+        
+        .connection-indicator.connected .pulse-dot {
+            width: 8px;
+            height: 8px;
+            background: #00ff41;
+            border-radius: 50%;
+            animation: pulse-green 2s infinite;
+            box-shadow: 0 0 8px #00ff41;
+        }
+        
+        .connection-indicator.disconnected {
+            background: rgba(255, 85, 85, 0.2);
+        }
+        
+        .connection-indicator.disconnected .pulse-dot {
+            width: 8px;
+            height: 8px;
+            background: #ff5555;
+            border-radius: 50%;
+            box-shadow: 0 0 8px #ff5555;
+        }
+        
+        .connection-indicator.testing {
+            background: rgba(97, 175, 239, 0.2);
+        }
+        
+        .connection-indicator.testing .pulse-dot {
+            width: 8px;
+            height: 8px;
+            background: #61afef;
+            border-radius: 50%;
+            animation: pulse-blue 0.5s infinite;
+            box-shadow: 0 0 8px #61afef;
+        }
+        
+        @keyframes pulse-blue {
+            0%, 100% {
+                opacity: 1;
+                transform: scale(1);
+            }
+            50% {
+                opacity: 0.5;
+                transform: scale(0.7);
+            }
+        }
+        
+        @keyframes pulse-green {
+            0%, 100% {
+                opacity: 1;
+                transform: scale(1);
+            }
+            50% {
+                opacity: 0.7;
+                transform: scale(0.85);
+            }
+        }
+        
+        /* VPS Card Header Alignment */
+        .vps-card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 15px;
+        }
+        
+        .vps-status {
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            padding: 4px 8px;
+            border-radius: 4px;
+            letter-spacing: 0.5px;
+        }
+        
+        .vps-status.running {
+            background: rgba(0, 255, 65, 0.15);
+            color: #00ff41;
+        }
+        
+        .vps-status.connected {
+            background: rgba(0, 200, 255, 0.15);
+            color: #00c8ff;
+        }
+        
+        .vps-status.stopped {
+            background: rgba(255, 170, 0, 0.15);
+            color: #ffaa00;
+        }
+        
+        .vps-status.deploying {
+            background: rgba(97, 175, 239, 0.15);
+            color: #61afef;
+        }
+        
+        .vps-status.error, .vps-status.offline {
+            background: rgba(255, 85, 85, 0.15);
+            color: #ff5555;
+        }
+        
+        .vps-status.pending {
+            background: rgba(139, 146, 167, 0.15);
+            color: #8b92a7;
+        }
+    </style>
 
     <script src="app.js"></script>
 </body>
 </html>
+
+
 

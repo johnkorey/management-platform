@@ -5,18 +5,8 @@
 const express = require('express');
 const router = express.Router();
 const crypto = require('crypto');
-const { Pool } = require('pg');
+const pool = require('../db');
 const SSHService = require('../services/ssh');
-
-// Database pool
-const pool = new Pool({
-    host: process.env.DB_HOST,
-    port: process.env.DB_PORT || 5432,
-    database: process.env.DB_NAME,
-    user: process.env.DB_USER,
-    password: process.env.DB_PASSWORD,
-    ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : false,
-});
 
 const sshService = new SSHService(pool);
 
@@ -33,12 +23,12 @@ const verifyGitHubSignature = async (req, res, next) => {
         }
 
         // Get secret from database
-        const result = await pool.query('SELECT secret_token FROM github_webhook_settings LIMIT 1');
+        const result = await pool.query('SELECT secret FROM github_webhook_settings LIMIT 1');
         if (result.rows.length === 0) {
             return res.status(500).json({ error: 'Webhook not configured' });
         }
 
-        const secret = result.rows[0].secret_token;
+        const secret = result.rows[0].secret;
         const payload = JSON.stringify(req.body);
         const expectedSignature = 'sha256=' + crypto
             .createHmac('sha256', secret)
@@ -82,19 +72,12 @@ router.post('/webhook', express.json(), verifyGitHubSignature, async (req, res) 
 
         console.log(`🔄 Push to branch ${branch} by ${pusher} (commit: ${commit})`);
 
-        // Update webhook settings
-        await pool.query(`
-            UPDATE github_webhook_settings 
-            SET last_push_at = NOW(), last_push_commit = $1 
-            WHERE repo_url = $2 OR $2 IS NULL
-        `, [payload.after, repoUrl]);
-
         // Check if auto-update is enabled
         const settingsResult = await pool.query(
-            'SELECT auto_update_enabled FROM github_webhook_settings LIMIT 1'
+            'SELECT auto_update FROM github_webhook_settings LIMIT 1'
         );
         
-        if (!settingsResult.rows[0]?.auto_update_enabled) {
+        if (!settingsResult.rows[0]?.auto_update) {
             console.log('Auto-update is disabled');
             return res.json({ message: 'Auto-update disabled' });
         }
@@ -102,7 +85,7 @@ router.post('/webhook', express.json(), verifyGitHubSignature, async (req, res) 
         // Get all deployed VPS instances matching this branch
         const vpsResult = await pool.query(`
             SELECT v.* FROM vps_instances v
-            WHERE v.is_deployed = TRUE 
+            WHERE v.is_deployed = true 
             AND v.github_branch = $1
             AND v.status NOT IN ('deploying', 'error')
         `, [branch]);
@@ -118,17 +101,16 @@ router.post('/webhook', express.json(), verifyGitHubSignature, async (req, res) 
         const updates = [];
         for (const vps of vpsResult.rows) {
             try {
+                const deployId = crypto.randomBytes(16).toString('hex');
+                
                 // Create deployment record
-                const deployResult = await pool.query(`
-                    INSERT INTO deployments (vps_id, user_id, type, from_version, triggered_by, git_commit)
-                    VALUES ($1, $2, 'update', $3, 'webhook', $4)
-                    RETURNING id
-                `, [vps.id, vps.user_id, vps.deployed_version, payload.after]);
-
-                const deploymentId = deployResult.rows[0].id;
+                await pool.query(`
+                    INSERT INTO deployments (id, vps_id, user_id, type, from_version, triggered_by)
+                    VALUES ($1, $2, $3, 'update', $4, 'webhook')
+                `, [deployId, vps.id, vps.user_id, vps.deployed_version]);
 
                 // Start deployment (non-blocking)
-                sshService.deploy(vps.id, deploymentId).then(() => {
+                sshService.deploy(vps.id, deployId).then(() => {
                     console.log(`✅ Auto-update completed for VPS ${vps.name}`);
                 }).catch(err => {
                     console.error(`❌ Auto-update failed for VPS ${vps.name}:`, err.message);
@@ -137,7 +119,7 @@ router.post('/webhook', express.json(), verifyGitHubSignature, async (req, res) 
                 updates.push({
                     vps_id: vps.id,
                     vps_name: vps.name,
-                    deployment_id: deploymentId
+                    deployment_id: deployId
                 });
             } catch (error) {
                 console.error(`Failed to create deployment for VPS ${vps.id}:`, error);
@@ -163,10 +145,10 @@ router.post('/webhook', express.json(), verifyGitHubSignature, async (req, res) 
 // WEBHOOK SETTINGS (Admin endpoints)
 // =====================================================
 
-const { authenticateToken } = require('../middleware/auth');
+const { authenticate, requireAdmin } = require('../middleware/auth');
 
-// GET /api/github/settings - Get webhook settings
-router.get('/settings', authenticateToken, async (req, res) => {
+// ✅ SECURITY FIX: GET /api/github/settings - Get webhook settings (ADMIN ONLY)
+router.get('/settings', authenticate, requireAdmin, async (req, res) => {
     try {
         const result = await pool.query('SELECT * FROM github_webhook_settings LIMIT 1');
         
@@ -181,20 +163,32 @@ router.get('/settings', authenticateToken, async (req, res) => {
     }
 });
 
-// PUT /api/github/settings - Update webhook settings
-router.put('/settings', authenticateToken, async (req, res) => {
+// ✅ SECURITY FIX: PUT /api/github/settings - Update webhook settings (ADMIN ONLY)
+router.put('/settings', authenticate, requireAdmin, async (req, res) => {
     try {
-        const { repo_url, branch, auto_update_enabled } = req.body;
+        const { repo_url, branch, auto_update, docker_image } = req.body;
 
-        const result = await pool.query(`
-            UPDATE github_webhook_settings 
-            SET 
-                repo_url = COALESCE($1, repo_url),
-                branch = COALESCE($2, branch),
-                auto_update_enabled = COALESCE($3, auto_update_enabled)
-            RETURNING *
-        `, [repo_url, branch, auto_update_enabled]);
+        // Check if settings exist
+        const existing = await pool.query('SELECT id FROM github_webhook_settings LIMIT 1');
+        
+        if (existing.rows.length === 0) {
+            // Create new settings
+            const settingsId = crypto.randomBytes(16).toString('hex');
+            const secret = crypto.randomBytes(32).toString('hex');
+            await pool.query(`
+                INSERT INTO github_webhook_settings (id, repo_url, branch, auto_update, secret, docker_image)
+                VALUES ($1, $2, $3, $4, $5, $6)
+            `, [settingsId, repo_url, branch || 'main', auto_update ? true : false, secret, docker_image || null]);
+        } else {
+            // Update existing
+            await pool.query(`
+                UPDATE github_webhook_settings 
+                SET repo_url = $1, branch = $2, auto_update = $3, docker_image = $4, updated_at = NOW()
+                WHERE id = $5
+            `, [repo_url, branch, auto_update ? true : false, docker_image || null, existing.rows[0].id]);
+        }
 
+        const result = await pool.query('SELECT * FROM github_webhook_settings LIMIT 1');
         res.json({ success: true, data: result.rows[0] });
     } catch (error) {
         console.error('Update webhook settings error:', error);
@@ -202,20 +196,31 @@ router.put('/settings', authenticateToken, async (req, res) => {
     }
 });
 
-// POST /api/github/regenerate-secret - Generate new webhook secret
-router.post('/regenerate-secret', authenticateToken, async (req, res) => {
+// ✅ SECURITY FIX: POST /api/github/regenerate-secret - Generate new webhook secret (ADMIN ONLY)
+router.post('/regenerate-secret', authenticate, requireAdmin, async (req, res) => {
     try {
         const newSecret = crypto.randomBytes(32).toString('hex');
         
-        await pool.query(
-            'UPDATE github_webhook_settings SET secret_token = $1',
-            [newSecret]
-        );
+        // Check if settings exist
+        const existing = await pool.query('SELECT id FROM github_webhook_settings LIMIT 1');
+        
+        if (existing.rows.length === 0) {
+            const settingsId = crypto.randomBytes(16).toString('hex');
+            await pool.query(`
+                INSERT INTO github_webhook_settings (id, secret)
+                VALUES ($1, $2)
+            `, [settingsId, newSecret]);
+        } else {
+            await pool.query(
+                'UPDATE github_webhook_settings SET secret = $1 WHERE id = $2',
+                [newSecret, existing.rows[0].id]
+            );
+        }
 
         res.json({ 
             success: true, 
             data: { 
-                secret_token: newSecret,
+                secret: newSecret,
                 message: 'Remember to update this in your GitHub webhook settings!' 
             } 
         });
@@ -225,8 +230,8 @@ router.post('/regenerate-secret', authenticateToken, async (req, res) => {
     }
 });
 
-// POST /api/github/test-update - Manually trigger update for all VPS
-router.post('/test-update', authenticateToken, async (req, res) => {
+// ✅ SECURITY FIX: POST /api/github/test-update - Manually trigger update for all VPS (ADMIN ONLY)
+router.post('/test-update', authenticate, requireAdmin, async (req, res) => {
     try {
         const updates = await sshService.updateAllVPS();
         
@@ -242,4 +247,3 @@ router.post('/test-update', authenticateToken, async (req, res) => {
 });
 
 module.exports = router;
-

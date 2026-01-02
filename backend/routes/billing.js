@@ -1,9 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { authenticate } = require('../middleware/auth');
-
-let pool;
-setTimeout(() => { pool = require('../server').pool; }, 100);
+const pool = require('../db');
 
 // GET /api/billing/payments - Get payment history
 router.get('/payments', authenticate, async (req, res) => {
@@ -14,6 +12,7 @@ router.get('/payments', authenticate, async (req, res) => {
         );
         res.json({ success: true, data: result.rows });
     } catch (error) {
+        console.error('Error fetching payments:', error);
         res.status(500).json({ success: false, message: 'Error fetching payments' });
     }
 });
@@ -29,4 +28,3 @@ router.post('/create-checkout', authenticate, async (req, res) => {
 });
 
 module.exports = router;
-

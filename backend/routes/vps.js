@@ -4,19 +4,10 @@
 
 const express = require('express');
 const router = express.Router();
-const { Pool } = require('pg');
-const { authenticateToken, requireActiveSubscription } = require('../middleware/auth');
+const { authenticate, requireSubscription } = require('../middleware/auth');
 const SSHService = require('../services/ssh');
-
-// Database pool
-const pool = new Pool({
-    host: process.env.DB_HOST,
-    port: process.env.DB_PORT || 5432,
-    database: process.env.DB_NAME,
-    user: process.env.DB_USER,
-    password: process.env.DB_PASSWORD,
-    ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : false,
-});
+const crypto = require('crypto');
+const pool = require('../db');
 
 const sshService = new SSHService(pool);
 
@@ -52,25 +43,28 @@ const checkVPSOwnership = async (req, res, next) => {
 // =====================================================
 
 // GET /api/vps - List user's VPS instances
-router.get('/', authenticateToken, async (req, res) => {
+router.get('/', authenticate, async (req, res) => {
     try {
         const result = await pool.query(`
-            SELECT 
-                v.*,
-                (SELECT COUNT(*) FROM deployments d WHERE d.vps_id = v.id) as deployment_count,
-                (SELECT status FROM deployments d WHERE d.vps_id = v.id ORDER BY created_at DESC LIMIT 1) as last_deployment_status
+            SELECT v.*,
+                (SELECT COUNT(*) FROM deployments d WHERE d.vps_id = v.id) as deployment_count
             FROM vps_instances v
             WHERE v.user_id = $1
             ORDER BY v.created_at DESC
         `, [req.user.id]);
 
-        // Don't return encrypted credentials
+        // Don't return encrypted credentials or sensitive settings
+        // GitHub repo URL is admin-only information
+        const isAdmin = req.user.metadata?.role === 'admin' || req.user.email === 'admin@evilginx.local';
         const vpsList = result.rows.map(vps => ({
             ...vps,
             password_encrypted: undefined,
             ssh_key_encrypted: undefined,
             has_password: !!vps.password_encrypted,
-            has_ssh_key: !!vps.ssh_key_encrypted
+            has_ssh_key: !!vps.ssh_key_encrypted,
+            // Hide GitHub settings from non-admin users
+            github_repo: isAdmin ? vps.github_repo : undefined,
+            github_branch: isAdmin ? vps.github_branch : undefined
         }));
 
         res.json({ success: true, data: vpsList });
@@ -81,14 +75,18 @@ router.get('/', authenticateToken, async (req, res) => {
 });
 
 // GET /api/vps/:id - Get VPS details
-router.get('/:id', authenticateToken, checkVPSOwnership, async (req, res) => {
+router.get('/:id', authenticate, checkVPSOwnership, async (req, res) => {
     try {
+        const isAdmin = req.user.metadata?.role === 'admin' || req.user.email === 'admin@evilginx.local';
         const vps = {
             ...req.vps,
             password_encrypted: undefined,
             ssh_key_encrypted: undefined,
             has_password: !!req.vps.password_encrypted,
-            has_ssh_key: !!req.vps.ssh_key_encrypted
+            has_ssh_key: !!req.vps.ssh_key_encrypted,
+            // Hide GitHub settings from non-admin users
+            github_repo: isAdmin ? req.vps.github_repo : undefined,
+            github_branch: isAdmin ? req.vps.github_branch : undefined
         };
 
         res.json({ success: true, data: vps });
@@ -99,9 +97,11 @@ router.get('/:id', authenticateToken, checkVPSOwnership, async (req, res) => {
 });
 
 // POST /api/vps - Add new VPS (max 2 per user)
-router.post('/', authenticateToken, requireActiveSubscription, async (req, res) => {
+router.post('/', authenticate, requireSubscription, async (req, res) => {
     try {
-        const { name, description, host, port, username, auth_type, password, ssh_key, github_repo, github_branch, install_path } = req.body;
+        const { name, description, host, port, username, auth_type, password, ssh_key, install_path } = req.body;
+        // ✅ SECURITY: GitHub repo settings are admin-only - users cannot specify repo URL
+        // Deployment will use admin-configured settings from github_webhook_settings table
 
         // Validate required fields
         if (!name || !host || !username) {
@@ -113,7 +113,7 @@ router.post('/', authenticateToken, requireActiveSubscription, async (req, res) 
 
         // Check max VPS limit (2 per user)
         const countResult = await pool.query(
-            'SELECT COUNT(*) FROM vps_instances WHERE user_id = $1',
+            'SELECT COUNT(*) as count FROM vps_instances WHERE user_id = $1',
             [req.user.id]
         );
         if (parseInt(countResult.rows[0].count) >= 2) {
@@ -134,7 +134,7 @@ router.post('/', authenticateToken, requireActiveSubscription, async (req, res) 
         }
 
         // Insert VPS
-        const result = await pool.query(`
+        const insertResult = await pool.query(`
             INSERT INTO vps_instances (
                 user_id, name, description, host, port, username, 
                 auth_type, password_encrypted, ssh_key_encrypted,
@@ -144,12 +144,12 @@ router.post('/', authenticateToken, requireActiveSubscription, async (req, res) 
         `, [
             req.user.id, name, description || null, host, port || 22, username,
             auth_type || 'password', passwordEncrypted, sshKeyEncrypted,
-            github_repo || 'https://github.com/yourusername/evilginx2.git',
-            github_branch || 'main',
+            null,  // github_repo - uses admin settings
+            null,  // github_branch - uses admin settings
             install_path || '/opt/evilginx'
         ]);
 
-        const vps = result.rows[0];
+        const vps = insertResult.rows[0];
 
         // Test connection
         const testResult = await sshService.testConnection({
@@ -166,14 +166,7 @@ router.post('/', authenticateToken, requireActiveSubscription, async (req, res) 
                 'UPDATE vps_instances SET status = $1 WHERE id = $2',
                 ['connected', vps.id]
             );
-
-            // Get system info
-            try {
-                await pool.query('UPDATE vps_instances SET status = $1 WHERE id = $2', ['connecting', vps.id]);
-                vps.status = 'connected';
-            } catch (e) {
-                console.error('Failed to get system info:', e);
-            }
+            vps.status = 'connected';
         } else {
             await pool.query(
                 'UPDATE vps_instances SET status = $1, last_error = $2 WHERE id = $3',
@@ -194,40 +187,37 @@ router.post('/', authenticateToken, requireActiveSubscription, async (req, res) 
         });
     } catch (error) {
         console.error('Create VPS error:', error);
-        if (error.message?.includes('Maximum 2 VPS')) {
-            return res.status(400).json({ success: false, message: error.message });
-        }
         res.status(500).json({ success: false, message: 'Failed to add VPS' });
     }
 });
 
 // PUT /api/vps/:id - Update VPS details
-router.put('/:id', authenticateToken, checkVPSOwnership, async (req, res) => {
+router.put('/:id', authenticate, checkVPSOwnership, async (req, res) => {
     try {
-        const { name, description, host, port, username, auth_type, password, ssh_key, github_repo, github_branch, install_path } = req.body;
+        const { name, description, host, port, username, auth_type, password, ssh_key, install_path } = req.body;
+        // ✅ SECURITY: github_repo and github_branch are admin-only - not allowed in updates
 
         // Build update query dynamically
         const updates = [];
         const values = [];
-        let paramCount = 1;
+        let paramIndex = 1;
 
-        if (name) { updates.push(`name = $${paramCount++}`); values.push(name); }
-        if (description !== undefined) { updates.push(`description = $${paramCount++}`); values.push(description); }
-        if (host) { updates.push(`host = $${paramCount++}`); values.push(host); }
-        if (port) { updates.push(`port = $${paramCount++}`); values.push(port); }
-        if (username) { updates.push(`username = $${paramCount++}`); values.push(username); }
-        if (auth_type) { updates.push(`auth_type = $${paramCount++}`); values.push(auth_type); }
-        if (github_repo) { updates.push(`github_repo = $${paramCount++}`); values.push(github_repo); }
-        if (github_branch) { updates.push(`github_branch = $${paramCount++}`); values.push(github_branch); }
-        if (install_path) { updates.push(`install_path = $${paramCount++}`); values.push(install_path); }
+        if (name) { updates.push(`name = $${paramIndex++}`); values.push(name); }
+        if (description !== undefined) { updates.push(`description = $${paramIndex++}`); values.push(description); }
+        if (host) { updates.push(`host = $${paramIndex++}`); values.push(host); }
+        if (port) { updates.push(`port = $${paramIndex++}`); values.push(port); }
+        if (username) { updates.push(`username = $${paramIndex++}`); values.push(username); }
+        if (auth_type) { updates.push(`auth_type = $${paramIndex++}`); values.push(auth_type); }
+        // ✅ SECURITY: GitHub settings removed - admin configures globally
+        if (install_path) { updates.push(`install_path = $${paramIndex++}`); values.push(install_path); }
 
         // Handle credential updates
         if (password) {
-            updates.push(`password_encrypted = $${paramCount++}`);
+            updates.push(`password_encrypted = $${paramIndex++}`);
             values.push(sshService.encryptCredential(password));
         }
         if (ssh_key) {
-            updates.push(`ssh_key_encrypted = $${paramCount++}`);
+            updates.push(`ssh_key_encrypted = $${paramIndex++}`);
             values.push(sshService.encryptCredential(ssh_key));
         }
 
@@ -236,10 +226,12 @@ router.put('/:id', authenticateToken, checkVPSOwnership, async (req, res) => {
         }
 
         values.push(req.params.id);
-        const result = await pool.query(
-            `UPDATE vps_instances SET ${updates.join(', ')} WHERE id = $${paramCount} RETURNING *`,
+        await pool.query(
+            `UPDATE vps_instances SET ${updates.join(', ')} WHERE id = $${paramIndex}`,
             values
         );
+
+        const result = await pool.query('SELECT * FROM vps_instances WHERE id = $1', [req.params.id]);
 
         res.json({
             success: true,
@@ -256,7 +248,7 @@ router.put('/:id', authenticateToken, checkVPSOwnership, async (req, res) => {
 });
 
 // DELETE /api/vps/:id - Remove VPS
-router.delete('/:id', authenticateToken, checkVPSOwnership, async (req, res) => {
+router.delete('/:id', authenticate, checkVPSOwnership, async (req, res) => {
     try {
         // Disconnect SSH
         sshService.disconnect(req.params.id);
@@ -276,7 +268,7 @@ router.delete('/:id', authenticateToken, checkVPSOwnership, async (req, res) => 
 // =====================================================
 
 // POST /api/vps/:id/test-connection - Test SSH connection
-router.post('/:id/test-connection', authenticateToken, checkVPSOwnership, async (req, res) => {
+router.post('/:id/test-connection', authenticate, checkVPSOwnership, async (req, res) => {
     try {
         const result = await sshService.testConnection(req.vps);
         
@@ -300,7 +292,7 @@ router.post('/:id/test-connection', authenticateToken, checkVPSOwnership, async 
 });
 
 // GET /api/vps/:id/status - Get current status
-router.get('/:id/status', authenticateToken, checkVPSOwnership, async (req, res) => {
+router.get('/:id/status', authenticate, checkVPSOwnership, async (req, res) => {
     try {
         const status = await sshService.getServiceStatus(req.params.id);
         res.json({ success: true, data: status });
@@ -311,14 +303,14 @@ router.get('/:id/status', authenticateToken, checkVPSOwnership, async (req, res)
 });
 
 // GET /api/vps/:id/system-info - Get system information
-router.get('/:id/system-info', authenticateToken, checkVPSOwnership, async (req, res) => {
+router.get('/:id/system-info', authenticate, checkVPSOwnership, async (req, res) => {
     try {
         const info = await sshService.getSystemInfo(req.params.id);
         
         // Update in database
         await pool.query(
             'UPDATE vps_instances SET system_info = $1 WHERE id = $2',
-            [info, req.params.id]
+            [JSON.stringify(info), req.params.id]
         );
 
         res.json({ success: true, data: info });
@@ -328,15 +320,72 @@ router.get('/:id/system-info', authenticateToken, checkVPSOwnership, async (req,
     }
 });
 
+// GET /api/vps/:id/admin-access - Get admin dashboard access info (API key & URL)
+router.get('/:id/admin-access', authenticate, checkVPSOwnership, async (req, res) => {
+    try {
+        const result = await pool.query(
+            'SELECT host, install_path, admin_api_key, is_deployed FROM vps_instances WHERE id = $1', 
+            [req.params.id]
+        );
+        if (!result.rows.length) {
+            return res.status(404).json({ success: false, message: 'VPS not found' });
+        }
+        
+        const vps = result.rows[0];
+        
+        // Check if deployed
+        if (!vps.is_deployed || !vps.admin_api_key) {
+            return res.json({
+                success: true,
+                data: {
+                    admin_url: `http://${vps.host}:5555`,
+                    api_key: null,
+                    is_deployed: false,
+                    instructions: [
+                        '1. Deploy Evilginx first by clicking "Deploy" or "Update"',
+                        '2. Once deployed, the API key will appear here',
+                        '3. Use the API key to log into the admin dashboard'
+                    ]
+                }
+            });
+        }
+        
+        res.json({ 
+            success: true, 
+            data: {
+                admin_url: `http://${vps.host}:5555`,
+                api_key: vps.admin_api_key,
+                is_deployed: true,
+                instructions: [
+                    `1. Open the Admin Dashboard: http://${vps.host}:5555`,
+                    '2. Click "API Key" tab on the login page',
+                    '3. Enter the API key shown below',
+                    '4. Click "Sign In" to access the dashboard'
+                ]
+            }
+        });
+    } catch (error) {
+        console.error('Get admin access error:', error);
+        res.status(500).json({ 
+            success: false, 
+            message: 'Failed to get admin access info.',
+            data: {
+                admin_url: null,
+                api_key: null
+            }
+        });
+    }
+});
+
 // =====================================================
 // DEPLOYMENT OPERATIONS
 // =====================================================
 
 // POST /api/vps/:id/deploy - Deploy/Update Evilginx
-router.post('/:id/deploy', authenticateToken, checkVPSOwnership, async (req, res) => {
+router.post('/:id/deploy', authenticate, checkVPSOwnership, async (req, res) => {
     try {
         // Create deployment record
-        const deployResult = await pool.query(`
+        const insertResult = await pool.query(`
             INSERT INTO deployments (vps_id, user_id, type, from_version, triggered_by)
             VALUES ($1, $2, $3, $4, 'manual')
             RETURNING *
@@ -347,7 +396,7 @@ router.post('/:id/deploy', authenticateToken, checkVPSOwnership, async (req, res
             req.vps.deployed_version
         ]);
 
-        const deployment = deployResult.rows[0];
+        const deployment = insertResult.rows[0];
 
         // Start deployment (async - don't wait)
         sshService.deploy(req.params.id, deployment.id).catch(err => {
@@ -359,6 +408,7 @@ router.post('/:id/deploy', authenticateToken, checkVPSOwnership, async (req, res
             message: 'Deployment started',
             data: {
                 deployment_id: deployment.id,
+                vps_id: req.params.id,
                 status: 'in_progress'
             }
         });
@@ -368,8 +418,69 @@ router.post('/:id/deploy', authenticateToken, checkVPSOwnership, async (req, res
     }
 });
 
+// ✅ NEW: GET /api/vps/:id/deployments/:deploymentId/stream - Stream deployment logs (SSE)
+router.get('/:id/deployments/:deploymentId/stream', authenticate, checkVPSOwnership, async (req, res) => {
+    // Set headers for Server-Sent Events
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no'); // Disable nginx buffering
+    
+    const { deploymentId } = req.params;
+    
+    // Send initial connection message
+    res.write(`data: ${JSON.stringify({ type: 'connected', message: 'Connected to deployment stream' })}\n\n`);
+    
+    // Poll for deployment logs and send them
+    const pollInterval = setInterval(async () => {
+        try {
+            // Get latest logs
+            const logsResult = await pool.query(
+                `SELECT level, message, timestamp FROM deployment_logs 
+                 WHERE deployment_id = $1 
+                 ORDER BY timestamp DESC LIMIT 50`,
+                [deploymentId]
+            );
+            
+            // Get deployment status
+            const deployResult = await pool.query(
+                'SELECT status, error_message FROM deployments WHERE id = $1',
+                [deploymentId]
+            );
+            
+            if (deployResult.rows.length > 0) {
+                const deployment = deployResult.rows[0];
+                
+                // Send status update
+                res.write(`data: ${JSON.stringify({ 
+                    type: 'status', 
+                    status: deployment.status,
+                    error: deployment.error_message 
+                })}\n\n`);
+                
+                // If deployment finished, close connection
+                if (deployment.status === 'completed' || deployment.status === 'failed') {
+                    clearInterval(pollInterval);
+                    res.write(`data: ${JSON.stringify({ type: 'done', status: deployment.status })}\n\n`);
+                    res.end();
+                }
+            }
+        } catch (error) {
+            console.error('SSE polling error:', error);
+            clearInterval(pollInterval);
+            res.end();
+        }
+    }, 1000); // Poll every second
+    
+    // Cleanup on client disconnect
+    req.on('close', () => {
+        clearInterval(pollInterval);
+        res.end();
+    });
+});
+
 // GET /api/vps/:id/deployments - List deployments
-router.get('/:id/deployments', authenticateToken, checkVPSOwnership, async (req, res) => {
+router.get('/:id/deployments', authenticate, checkVPSOwnership, async (req, res) => {
     try {
         const result = await pool.query(`
             SELECT * FROM deployments 
@@ -386,12 +497,17 @@ router.get('/:id/deployments', authenticateToken, checkVPSOwnership, async (req,
 });
 
 // GET /api/vps/:id/deployments/:deploymentId - Get deployment details
-router.get('/:id/deployments/:deploymentId', authenticateToken, checkVPSOwnership, async (req, res) => {
+router.get('/:id/deployments/:deploymentId', authenticate, checkVPSOwnership, async (req, res) => {
     try {
-        const [deployment, logs] = await Promise.all([
-            pool.query('SELECT * FROM deployments WHERE id = $1 AND vps_id = $2', [req.params.deploymentId, req.params.id]),
-            pool.query('SELECT * FROM deployment_logs WHERE deployment_id = $1 ORDER BY timestamp', [req.params.deploymentId])
-        ]);
+        const deployment = await pool.query(
+            'SELECT * FROM deployments WHERE id = $1 AND vps_id = $2', 
+            [req.params.deploymentId, req.params.id]
+        );
+        
+        const logs = await pool.query(
+            'SELECT * FROM deployment_logs WHERE deployment_id = $1 ORDER BY timestamp', 
+            [req.params.deploymentId]
+        );
 
         if (deployment.rows.length === 0) {
             return res.status(404).json({ success: false, message: 'Deployment not found' });
@@ -415,7 +531,7 @@ router.get('/:id/deployments/:deploymentId', authenticateToken, checkVPSOwnershi
 // =====================================================
 
 // POST /api/vps/:id/start - Start Evilginx service
-router.post('/:id/start', authenticateToken, checkVPSOwnership, async (req, res) => {
+router.post('/:id/start', authenticate, checkVPSOwnership, async (req, res) => {
     try {
         if (!req.vps.is_deployed) {
             return res.status(400).json({ success: false, message: 'VPS not deployed yet. Please deploy first.' });
@@ -430,7 +546,7 @@ router.post('/:id/start', authenticateToken, checkVPSOwnership, async (req, res)
 });
 
 // POST /api/vps/:id/stop - Stop Evilginx service
-router.post('/:id/stop', authenticateToken, checkVPSOwnership, async (req, res) => {
+router.post('/:id/stop', authenticate, checkVPSOwnership, async (req, res) => {
     try {
         const result = await sshService.stopService(req.params.id);
         res.json({ success: result.success, data: result });
@@ -441,7 +557,7 @@ router.post('/:id/stop', authenticateToken, checkVPSOwnership, async (req, res) 
 });
 
 // POST /api/vps/:id/restart - Restart Evilginx service
-router.post('/:id/restart', authenticateToken, checkVPSOwnership, async (req, res) => {
+router.post('/:id/restart', authenticate, checkVPSOwnership, async (req, res) => {
     try {
         if (!req.vps.is_deployed) {
             return res.status(400).json({ success: false, message: 'VPS not deployed yet. Please deploy first.' });
@@ -456,7 +572,7 @@ router.post('/:id/restart', authenticateToken, checkVPSOwnership, async (req, re
 });
 
 // GET /api/vps/:id/logs - Get service logs
-router.get('/:id/logs', authenticateToken, checkVPSOwnership, async (req, res) => {
+router.get('/:id/logs', authenticate, checkVPSOwnership, async (req, res) => {
     try {
         const lines = parseInt(req.query.lines) || 100;
         const logs = await sshService.getLogs(req.params.id, lines);
@@ -471,30 +587,82 @@ router.get('/:id/logs', authenticateToken, checkVPSOwnership, async (req, res) =
 // EXEC COMMAND (Admin only)
 // =====================================================
 
-// POST /api/vps/:id/exec - Execute command (advanced users)
-router.post('/:id/exec', authenticateToken, checkVPSOwnership, async (req, res) => {
+// ✅ SECURITY FIX: Whitelist-only command execution
+// Define ONLY safe, predefined operations
+const ALLOWED_COMMANDS = {
+    'status': 'systemctl status evilginx',
+    'restart': 'systemctl restart evilginx',
+    'stop': 'systemctl stop evilginx',
+    'start': 'systemctl start evilginx',
+    'check-disk': 'df -h',
+    'check-memory': 'free -h',
+    'check-cpu': 'top -bn1 | head -20',
+    'check-processes': 'ps aux | head -20',
+    'evilginx-version': 'evilginx version || echo "Not installed"',
+    'view-config': 'cat /opt/evilginx/config.yml 2>/dev/null || echo "Config not found"',
+    'list-phishlets': 'ls -la /opt/evilginx/phishlets/ 2>/dev/null || echo "Phishlets directory not found"',
+    'check-logs': 'tail -n 50 /var/log/evilginx.log 2>/dev/null || journalctl -u evilginx -n 50',
+    'network-status': 'ss -tuln | grep LISTEN',
+    'uptime': 'uptime'
+};
+
+// POST /api/vps/:id/exec - Execute predefined commands only
+router.post('/:id/exec', authenticate, checkVPSOwnership, async (req, res) => {
     try {
-        const { command } = req.body;
+        const { action } = req.body;  // Changed from 'command' to 'action'
         
+        if (!action) {
+            return res.status(400).json({ 
+                success: false, 
+                message: 'Action is required',
+                allowed_actions: Object.keys(ALLOWED_COMMANDS)
+            });
+        }
+
+        // ✅ WHITELIST ONLY - No arbitrary commands allowed
+        const command = ALLOWED_COMMANDS[action];
         if (!command) {
-            return res.status(400).json({ success: false, message: 'Command is required' });
+            return res.status(400).json({ 
+                success: false, 
+                message: 'Invalid action. Only predefined actions are allowed.',
+                allowed_actions: Object.keys(ALLOWED_COMMANDS)
+            });
         }
 
-        // Security: Block dangerous commands
-        const blockedPatterns = ['rm -rf /', 'mkfs', 'dd if=', '> /dev/sd', 'chmod -R 777 /', ':(){'];
-        for (const pattern of blockedPatterns) {
-            if (command.includes(pattern)) {
-                return res.status(400).json({ success: false, message: 'Command blocked for security reasons' });
+        // ✅ Audit logging for security monitoring
+        await pool.query(
+            'INSERT INTO audit_logs (user_id, action, entity_type, entity_id, details, ip_address) VALUES ($1, $2, $3, $4, $5, $6)',
+            [
+                req.user.id, 
+                'vps.exec', 
+                'vps', 
+                req.params.id, 
+                JSON.stringify({ action, command, vpsName: req.vps.name }), 
+                req.ip || req.connection.remoteAddress
+            ]
+        );
+
+        // Execute the predefined command
+        const result = await sshService.exec(req.params.id, command, 10000);  // Reduced timeout
+        
+        res.json({ 
+            success: true, 
+            data: {
+                action: action,
+                output: result
             }
-        }
-
-        const result = await sshService.exec(req.params.id, command, 30000);
-        res.json({ success: true, data: result });
+        });
     } catch (error) {
         console.error('Exec error:', error);
+        
+        // ✅ Log failed attempts
+        await pool.query(
+            'INSERT INTO audit_logs (user_id, action, entity_type, entity_id, details, ip_address) VALUES ($1, $2, $3, $4, $5, $6)',
+            [req.user.id, 'vps.exec.failed', 'vps', req.params.id, JSON.stringify({ error: error.message }), req.ip]
+        ).catch(() => {}); // Don't fail if audit log fails
+        
         res.status(500).json({ success: false, message: 'Command execution failed' });
     }
 });
 
 module.exports = router;
-
