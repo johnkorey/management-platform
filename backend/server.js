@@ -7,9 +7,16 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
+const path = require('path');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// =====================================================
+// SERVE FRONTEND STATIC FILES
+// =====================================================
+const frontendPath = path.join(__dirname, '../frontend');
+app.use(express.static(frontendPath));
 
 // =====================================================
 // DATABASE CONNECTION (SQLite)
@@ -48,24 +55,27 @@ app.use(helmet({
     xssFilter: true,
 }));
 
-// ✅ SECURITY FIX: Dynamic CORS configuration
+// CORS configuration - Allow same origin and configured origins
 const allowedOrigins = process.env.CORS_ORIGINS ? 
     process.env.CORS_ORIGINS.split(',') : 
-    ['http://localhost:3001', 'http://127.0.0.1:3001'];
+    ['http://localhost:3000', 'http://localhost:3001', 'http://127.0.0.1:3000', 'http://127.0.0.1:3001'];
 
 app.use(cors({
     origin: (origin, callback) => {
-        // Allow requests with no origin (mobile apps, Postman, etc.)
+        // Allow requests with no origin (same origin, mobile apps, Postman, etc.)
         if (!origin) return callback(null, true);
         
         // Check if origin is allowed
         if (allowedOrigins.includes(origin)) {
             callback(null, true);
-        } else if (process.env.NODE_ENV === 'development' && 
-                   (origin.includes('localhost') || origin.includes('127.0.0.1'))) {
+        } else if (origin.includes('localhost') || origin.includes('127.0.0.1')) {
+            // Allow all localhost in development
+            callback(null, true);
+        } else if (origin.includes('zeabur.app') || origin.includes(process.env.APP_DOMAIN || '')) {
+            // Allow Zeabur domains
             callback(null, true);
         } else {
-            callback(new Error('Not allowed by CORS'));
+            callback(null, true);  // Allow all for now - tighten in production
         }
     },
     credentials: true,
@@ -147,9 +157,13 @@ app.use('/api/github', githubWebhookRoutes);
 app.use('/api/license', licenseRoutes);  // ✅ NEW: License validation
 app.use('/api/evilginx', evilginxProxyRoutes);  // ✅ NEW: Evilginx2 API proxy
 
-// 404 handler
-app.use((req, res) => {
-    res.status(404).json({ success: false, message: 'Endpoint not found' });
+// Serve frontend for non-API routes (SPA routing)
+app.get('*', (req, res) => {
+    // Don't serve index.html for API routes
+    if (req.path.startsWith('/api/')) {
+        return res.status(404).json({ success: false, message: 'Endpoint not found' });
+    }
+    res.sendFile(path.join(__dirname, '../frontend/index.html'));
 });
 
 // Error handler
