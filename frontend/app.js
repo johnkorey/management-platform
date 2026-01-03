@@ -4,7 +4,8 @@
 
 class ManagementApp {
     constructor() {
-        this.apiBase = 'http://localhost:3000/api';
+        // Use relative URL - nginx proxies /api to backend
+        this.apiBase = '/api';
         this.token = localStorage.getItem('token');
         this.user = JSON.parse(localStorage.getItem('user') || 'null');
         this.vpsList = [];
