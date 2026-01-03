@@ -207,7 +207,7 @@ app.use((err, req, res, next) => {
 app.listen(PORT, () => {
     console.log('');
     console.log('🚀 ===============================================');
-    console.log('🎯 Evilginx Management Platform API Server');
+    console.log('🎯 Evilginx Management Platform API Server v1.1');
     console.log('🚀 ===============================================');
     console.log(`📡 Server running on: http://localhost:${PORT}`);
     console.log(`🗄️  Database: ${process.env.DB_NAME}@${process.env.DB_HOST}`);
