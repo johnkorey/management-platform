@@ -331,6 +331,16 @@ body {
     background: #ff6666;
 }
 
+.btn-warning {
+    background: #f59e0b;
+    color: #000;
+}
+
+.btn-warning:hover {
+    background: #fbbf24;
+    box-shadow: 0 0 15px rgba(245, 158, 11, 0.4);
+}
+
 .btn-block {
     width: 100%;
 }
