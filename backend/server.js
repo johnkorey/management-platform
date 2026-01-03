@@ -157,12 +157,13 @@ app.use('/api/github', githubWebhookRoutes);
 app.use('/api/license', licenseRoutes);  // ✅ NEW: License validation
 app.use('/api/evilginx', evilginxProxyRoutes);  // ✅ NEW: Evilginx2 API proxy
 
+// 404 handler for API routes (all methods)
+app.all('/api/*', (req, res) => {
+    res.status(404).json({ success: false, message: 'API endpoint not found' });
+});
+
 // Serve frontend for non-API routes (SPA routing)
 app.get('*', (req, res) => {
-    // Don't serve index.html for API routes
-    if (req.path.startsWith('/api/')) {
-        return res.status(404).json({ success: false, message: 'Endpoint not found' });
-    }
     res.sendFile(path.join(__dirname, '../frontend/index.html'));
 });
 
