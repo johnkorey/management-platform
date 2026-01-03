@@ -1026,18 +1026,73 @@ class ManagementApp {
         const vps = this.vpsList.find(v => v.id === id);
         if (!vps) return;
 
-        // Ask for phishlet name
-        const phishlet = prompt('Enter the phishlet name to regenerate SSL certificates for (e.g., icloud, google, microsoft):');
-        if (!phishlet || !phishlet.trim()) {
+        // Show Force SSL modal
+        this.showForceSSLModal(id);
+    }
+
+    showForceSSLModal(vpsId) {
+        // Create modal if it doesn't exist
+        let modal = document.getElementById('force-ssl-modal');
+        if (!modal) {
+            modal = document.createElement('div');
+            modal.id = 'force-ssl-modal';
+            modal.className = 'modal-backdrop hidden';
+            modal.innerHTML = `
+                <div class="modal">
+                    <div class="modal-header">
+                        <h2>Force SSL Certificate</h2>
+                        <button class="modal-close" onclick="app.closeForceSSLModal()">&times;</button>
+                    </div>
+                    <div class="modal-content">
+                        <div class="form-group">
+                            <label for="force-ssl-phishlet">Phishlet Name</label>
+                            <input type="text" id="force-ssl-phishlet" placeholder="e.g., icloud, google, microsoft">
+                            <small style="color: var(--text-muted);">Enter the phishlet name to regenerate SSL certificates for</small>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button class="btn btn-secondary" onclick="app.closeForceSSLModal()">Cancel</button>
+                        <button class="btn btn-warning" id="force-ssl-submit">Regenerate SSL</button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(modal);
+        }
+
+        // Store VPS ID and show modal
+        this.forceSSLVpsId = vpsId;
+        document.getElementById('force-ssl-phishlet').value = '';
+        modal.classList.remove('hidden');
+
+        // Set up submit handler
+        document.getElementById('force-ssl-submit').onclick = () => this.submitForceSSL();
+        
+        // Focus input
+        setTimeout(() => document.getElementById('force-ssl-phishlet').focus(), 100);
+    }
+
+    closeForceSSLModal() {
+        const modal = document.getElementById('force-ssl-modal');
+        if (modal) {
+            modal.classList.add('hidden');
+        }
+    }
+
+    async submitForceSSL() {
+        const phishlet = document.getElementById('force-ssl-phishlet').value.trim();
+        
+        if (!phishlet) {
             this.showToast('Phishlet name is required', 'warning');
             return;
         }
 
+        this.closeForceSSLModal();
+
         try {
             this.showToast('Regenerating SSL certificates...', 'info');
-            const response = await this.apiRequest(`/vps/${id}/force-ssl`, { 
+            const response = await this.apiRequest(`/vps/${this.forceSSLVpsId}/force-ssl`, { 
                 method: 'POST',
-                body: JSON.stringify({ phishlet: phishlet.trim() })
+                body: JSON.stringify({ phishlet })
             });
             
             if (response.success) {
