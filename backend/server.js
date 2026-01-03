@@ -111,19 +111,42 @@ app.use((req, res, next) => {
 // ROUTES
 // =====================================================
 
-// Import route modules
-const authRoutes = require('./routes/auth');
-const userRoutes = require('./routes/users');
-const subscriptionRoutes = require('./routes/subscriptions');
-const instanceRoutes = require('./routes/instances');
-const sessionRoutes = require('./routes/sessions');
-const billingRoutes = require('./routes/billing');
-const statsRoutes = require('./routes/stats');
-const webhookRoutes = require('./routes/webhooks');
-const vpsRoutes = require('./routes/vps');
-const githubWebhookRoutes = require('./routes/github-webhook');
-const licenseRoutes = require('./routes/license');  // ✅ NEW: License validation
-const evilginxProxyRoutes = require('./routes/evilginx-proxy');  // ✅ NEW: Evilginx2 API proxy
+// Import route modules with error handling
+let authRoutes, userRoutes, subscriptionRoutes, instanceRoutes, sessionRoutes;
+let billingRoutes, statsRoutes, webhookRoutes, vpsRoutes, githubWebhookRoutes;
+let licenseRoutes, evilginxProxyRoutes;
+
+try {
+    console.log('Loading routes...');
+    authRoutes = require('./routes/auth');
+    console.log('✓ auth routes loaded');
+    userRoutes = require('./routes/users');
+    console.log('✓ users routes loaded');
+    subscriptionRoutes = require('./routes/subscriptions');
+    console.log('✓ subscriptions routes loaded');
+    instanceRoutes = require('./routes/instances');
+    console.log('✓ instances routes loaded');
+    sessionRoutes = require('./routes/sessions');
+    console.log('✓ sessions routes loaded');
+    billingRoutes = require('./routes/billing');
+    console.log('✓ billing routes loaded');
+    statsRoutes = require('./routes/stats');
+    console.log('✓ stats routes loaded');
+    webhookRoutes = require('./routes/webhooks');
+    console.log('✓ webhooks routes loaded');
+    vpsRoutes = require('./routes/vps');
+    console.log('✓ vps routes loaded');
+    githubWebhookRoutes = require('./routes/github-webhook');
+    console.log('✓ github-webhook routes loaded');
+    licenseRoutes = require('./routes/license');
+    console.log('✓ license routes loaded');
+    evilginxProxyRoutes = require('./routes/evilginx-proxy');
+    console.log('✓ evilginx-proxy routes loaded');
+    console.log('All routes loaded successfully!');
+} catch (error) {
+    console.error('❌ ROUTE LOADING ERROR:', error);
+    process.exit(1);
+}
 
 // Health check endpoints
 app.get('/health', (req, res) => {
